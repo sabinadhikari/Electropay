@@ -14,6 +14,10 @@ Customers are stored separately from payment records with a required `customerNa
 
 JSON backups include the customer directory. Excel backups keep a Customer Directory sheet and link payment rows to customers by ID.
 
+## Record numbers
+
+Customers and payments have separate stable display references (`CUS-000001`, `PAY-000001`) in addition to their internal IDs. Existing IDs and receipt numbers are preserved. Monotonic number sequences are stored in app state and Excel backup metadata so deleting or restoring records does not renumber them or reuse issued numbers. S.N. values in tables are display positions and follow the current filtered/sorted list; payment-list serials continue across pages. Bills, meter readings, and sections are not separate record types in the current data model.
+
 ## Deleted records
 
 Deleting a customer or payment moves it to Deleted Records instead of removing it immediately. Deleted customers and their active payments are grouped so restoring the customer restores the related payment history and recalculates active balances. Deleted payments are excluded from active lists, reports, receipts, and ledger calculations until restored. Permanently deleted items are recorded in a minimal local audit log.
