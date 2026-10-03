@@ -213,6 +213,26 @@
     const selectedPaymentIds = new Set();
     let activeReceiptType = 'single';
 
+    function formatDateForDisplay(dateValue) {
+      const rawValue = String(dateValue ?? '').trim();
+      if (!rawValue || rawValue === 'N/A') return 'N/A';
+      try {
+        const NepaliDateCtor = typeof window !== 'undefined' && (
+          (typeof window.NepaliDate === 'function' ? window.NepaliDate : window.NepaliDate?.default)
+        );
+        if (NepaliDateCtor) {
+          const adDate = /\d{4}-\d{2}-\d{2}/.test(rawValue)
+            ? new Date(`${rawValue}T00:00:00Z`)
+            : new Date(rawValue);
+          return `${new NepaliDateCtor(adDate).format('YYYY-MM-DD')} BS`;
+        }
+        return rawValue;
+      } catch (error) {
+        console.warn('Could not format date in Nepali BS:', error);
+        return rawValue;
+      }
+    }
+
     // Chart instances store
     let activeCharts = {
       consumption: null,
@@ -507,7 +527,7 @@
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors';
         tr.innerHTML = `
-          <td class="px-5 py-3 font-medium">${r.date}</td>
+          <td class="px-5 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
           <td class="px-5 py-3 font-mono text-xs">${r.receiptNo}</td>
           <td class="px-5 py-3 text-right">${r.units}</td>
           <td class="px-5 py-3 text-right">Rs. ${r.billCost.toLocaleString()}</td>
@@ -660,9 +680,10 @@
       selectedPaymentIds.forEach(id => {
         if (!currentRecordIds.has(id)) selectedPaymentIds.delete(id);
       });
-      const filtered = state.records.filter(r =>
-        r.receiptNo.toLowerCase().includes(query) || r.date.includes(query)
-      );
+      const filtered = state.records.filter(r => {
+        const searchable = `${r.receiptNo} ${r.date} ${formatDateForDisplay(r.date)}`.toLowerCase();
+        return searchable.includes(query);
+      });
 
       document.getElementById('records-count').textContent = `Showing ${filtered.length} of ${state.records.length} records`;
       updatePaymentSelectionSummary(filtered);
@@ -678,7 +699,7 @@
         tr.innerHTML = `
           <td class="px-4 py-3 text-center"></td>
           <td class="px-4 py-3 font-mono text-xs font-bold">${r.receiptNo}</td>
-          <td class="px-4 py-3 font-medium">${r.date}</td>
+          <td class="px-4 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
           <td class="px-4 py-3 text-right">${r.units}</td>
           <td class="px-4 py-3 text-right">Rs. ${r.billCost.toLocaleString()}</td>
           <td class="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">Rs. ${r.amountPaid.toLocaleString()}</td>
@@ -710,9 +731,10 @@
 
     function getFilteredPaymentRecords() {
       const query = document.getElementById('records-search')?.value.toLowerCase() || '';
-      return state.records.filter(record =>
-        record.receiptNo.toLowerCase().includes(query) || record.date.includes(query)
-      );
+      return state.records.filter(record => {
+        const searchable = `${record.receiptNo} ${record.date} ${formatDateForDisplay(record.date)}`.toLowerCase();
+        return searchable.includes(query);
+      });
     }
 
     function formatReceiptAmount(amount) {
@@ -780,7 +802,7 @@
       selectedRecords.forEach(record => {
         const row = document.createElement('tr');
         [
-          { value: record.date },
+          { value: formatDateForDisplay(record.date) },
           { value: record.receiptNo, className: 'font-mono font-semibold' },
           { value: record.paymentMethod || '—' },
           { value: `Rs. ${formatReceiptAmount(record.amountPaid)}`, className: 'amount font-semibold' }
@@ -800,7 +822,7 @@
       document.getElementById('combined-receipt-count').textContent =
         `${selectedRecords.length} ${selectedRecords.length === 1 ? 'payment' : 'payments'}`;
       document.getElementById('combined-receipt-total').textContent = `Rs. ${formatReceiptAmount(total)}`;
-      document.getElementById('combined-receipt-latest-date').textContent = latest.date;
+      document.getElementById('combined-receipt-latest-date').textContent = formatDateForDisplay(latest.date);
       const due = Number(latest.newDue || 0);
       const advance = Number(latest.newAdvance || 0);
       document.getElementById('combined-receipt-balance').textContent =
@@ -857,7 +879,7 @@
       const textColor = isDark ? '#9ca3af' : '#4b5563';
       const gridColor = isDark ? '#374151' : '#e5e7eb';
 
-      const labels = state.records.map(r => r.date);
+      const labels = state.records.map(r => formatDateForDisplay(r.date));
       const unitsData = state.records.map(r => r.units);
       const billedData = state.records.map(r => r.billCost);
       const paidData = state.records.map(r => r.amountPaid);
@@ -948,7 +970,7 @@
       document.getElementById('snap-due').textContent = `Rs. ${latest.currentDue.toLocaleString()}`;
       document.getElementById('snap-last-reading').textContent = latest.lastReading;
       document.getElementById('snap-rate').textContent = `Rs. ${state.settings.rate} / Unit`;
-      document.getElementById('snap-last-date').textContent = latest.lastDate;
+      document.getElementById('snap-last-date').textContent = formatDateForDisplay(latest.lastDate);
     }
 
     function loadSettingsForm() {
@@ -1784,7 +1806,7 @@
       document.getElementById('receipt-card').classList.remove('hidden');
       document.getElementById('receipt-print-label').textContent = 'Print Receipt';
       document.getElementById('rcpt-no').textContent = rec.receiptNo;
-      document.getElementById('rcpt-date').textContent = rec.date;
+      document.getElementById('rcpt-date').textContent = formatDateForDisplay(rec.date);
       document.getElementById('rcpt-prev-reading').textContent = rec.previousReading;
       document.getElementById('rcpt-curr-reading').textContent = rec.currentReading;
       document.getElementById('rcpt-units').textContent = rec.units;
