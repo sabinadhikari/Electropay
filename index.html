@@ -240,14 +240,20 @@
               </div>
             </div>
 
+            <div id="first-reading-notice" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200" role="status">
+              <span class="inline-flex items-center rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold tracking-wider text-amber-900 dark:bg-amber-900 dark:text-amber-100" data-i18n="firstReadingBadge">FIRST READING</span>
+              <p class="mt-1 text-xs" data-i18n="firstReadingNotice">No previous meter reading is available for this customer. This is their initial reading; consumption will be billed after the next reading.</p>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label for="input-prev-reading" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="history" aria-hidden="true"></i><span data-i18n="lblPrevReading">Previous Reading</span></label>
-                <input type="number" id="input-prev-reading" step="any" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+                <input type="number" id="input-prev-reading" step="any" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
               </div>
               <div>
                 <label for="input-curr-reading" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="gauge" aria-hidden="true"></i><span data-i18n="lblCurrReading">Current Reading</span></label>
-                <input type="number" id="input-curr-reading" step="any" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+                <input type="number" id="input-curr-reading" step="any" min="0" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+                <p id="reading-validation-error" class="hidden mt-1 text-xs text-red-600 dark:text-red-400" role="alert" data-i18n="readingLowerError">Current reading cannot be lower than the previous reading.</p>
               </div>
               <div>
                 <label for="input-rate" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="circle-dollar-sign" aria-hidden="true"></i><span data-i18n="lblRate">Rate (Rs / Unit)</span></label>
@@ -670,7 +676,8 @@
                   </h4>
                   <div class="space-y-3 text-xs">
                     <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblDate">Payment Date</span><span id="rcpt-date" class="font-semibold text-slate-900 text-right">-</span></div>
-                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblPrevReading">Previous Reading</span><span id="rcpt-prev-reading" class="font-semibold text-slate-900 text-right">0</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblPrevReading">Previous Reading</span><span id="rcpt-prev-reading" class="font-semibold text-slate-900 text-right">Not Available (First Reading)</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="readingType">Reading Type</span><span id="rcpt-reading-type" class="font-semibold text-slate-900 text-right">First Reading</span></div>
                     <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblCurrReading">Current Reading</span><span id="rcpt-curr-reading" class="font-semibold text-slate-900 text-right">0</span></div>
                     <div class="flex justify-between gap-4 rounded-lg bg-white px-3 py-2 border border-slate-100"><span class="font-semibold text-slate-600" data-i18n="unitsConsumed">Units Consumed</span><span id="rcpt-units" class="font-bold text-slate-900 text-right">0</span></div>
                     <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblRate">Rate per Unit</span><span id="rcpt-rate" class="font-semibold text-slate-900 text-right">Rs. 0</span></div>

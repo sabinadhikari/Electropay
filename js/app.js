@@ -39,6 +39,14 @@
         lblPaymentMethod: "Payment Method",
         lblPrevReading: "Previous Reading",
         lblCurrReading: "Current Reading",
+        firstReadingBadge: "FIRST READING",
+        firstReadingNotice: "No previous meter reading is available for this customer. This is their initial reading; consumption will be billed after the next reading.",
+        firstReadingUnavailable: "Not Available (First Reading)",
+        readingType: "Reading Type",
+        readingTypeFirst: "First Reading",
+        readingTypeNormal: "Normal Billing",
+        readingLowerError: "Current reading cannot be lower than the previous reading.",
+        missingPreviousReadingError: "A previous reading is required for an existing customer.",
         lblRate: "Rate (Rs / Unit)",
         liveSummaryTitle: "Live Financial Summary",
         unitsConsumed: "Units Consumed",
@@ -130,6 +138,14 @@
         lblPaymentMethod: "भुक्तानी माध्यम",
         lblPrevReading: "अघिल्लो रिडिङ",
         lblCurrReading: "हालको रिडिङ",
+        firstReadingBadge: "पहिलो रिडिङ",
+        firstReadingNotice: "यस ग्राहकको अघिल्लो मिटर रिडिङ उपलब्ध छैन। यो प्रारम्भिक रिडिङ हो; अर्को रिडिङपछि खपतको बिल लाग्नेछ।",
+        firstReadingUnavailable: "उपलब्ध छैन (पहिलो रिडिङ)",
+        readingType: "रिडिङको प्रकार",
+        readingTypeFirst: "पहिलो रिडिङ",
+        readingTypeNormal: "सामान्य बिलिङ",
+        readingLowerError: "हालको रिडिङ अघिल्लो रिडिङभन्दा कम हुन सक्दैन।",
+        missingPreviousReadingError: "पहिलेबाट रहेका ग्राहकका लागि अघिल्लो रिडिङ आवश्यक छ।",
         lblRate: "दर (रु / युनिट)",
         liveSummaryTitle: "प्रत्यक्ष वित्तीय सारांश",
         unitsConsumed: "खपत युनिट",
@@ -364,7 +380,12 @@
       let runningDue = 0;
 
       state.records = state.records.map((rec, idx) => {
-        const units = Math.max(0, rec.currentReading - rec.previousReading);
+        const hasPreviousReading = rec.previousReading !== null &&
+          rec.previousReading !== undefined && rec.previousReading !== '';
+        const previousReading = hasPreviousReading ? Number(rec.previousReading) : null;
+        const units = hasPreviousReading
+          ? Math.max(0, Number(rec.currentReading) - previousReading)
+          : 0;
         const billCost = units * rec.rate;
 
         const prevAdvance = runningAdvance;
@@ -402,6 +423,7 @@
 
         return {
           ...rec,
+          previousReading,
           id: rec.id || `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${idx}-${Math.random().toString(16).slice(2)}`}`,
           receiptNo: rec.receiptNo || `${state.settings.receiptPrefix}${String(idx + 1).padStart(6, '0')}`,
           units,
@@ -423,7 +445,8 @@
     function getLatestLedgerState() {
       if (state.records.length === 0) {
         return {
-          lastReading: 0,
+          lastReading: null,
+          hasPreviousReading: false,
           currentAdvance: 0,
           currentDue: 0,
           lastDate: 'N/A'
@@ -432,6 +455,8 @@
       const last = state.records[state.records.length - 1];
       return {
         lastReading: last.currentReading,
+        hasPreviousReading: last.currentReading !== null &&
+          last.currentReading !== undefined && last.currentReading !== '',
         currentAdvance: last.newAdvance,
         currentDue: last.newDue,
         lastDate: last.date
@@ -614,23 +639,46 @@
     function setupNewPaymentForm() {
       const latest = getLatestLedgerState();
       document.getElementById('input-date').value = formatNepaliDate().replace(/ BS$/, '');
-      document.getElementById('input-prev-reading').value = latest.lastReading;
-      document.getElementById('input-curr-reading').value = latest.lastReading;
+      const previousInput = document.getElementById('input-prev-reading');
+      previousInput.value = latest.hasPreviousReading ? latest.lastReading : '';
+      previousInput.placeholder = latest.hasPreviousReading
+        ? ''
+        : translations[state.uiPreferences.lang].firstReadingUnavailable;
+      previousInput.readOnly = !latest.hasPreviousReading;
+      previousInput.required = latest.hasPreviousReading;
+      document.getElementById('first-reading-notice').classList.toggle('hidden', latest.hasPreviousReading);
+      document.getElementById('input-curr-reading').value = latest.hasPreviousReading ? latest.lastReading : '';
       document.getElementById('input-rate').value = state.settings.rate;
       document.getElementById('input-amount-paid').value = 0;
       calculateLivePaymentSummary();
     }
 
     function calculateLivePaymentSummary() {
-      const prevReading = parseFloat(document.getElementById('input-prev-reading').value) || 0;
-      const currReading = parseFloat(document.getElementById('input-curr-reading').value) || 0;
+      const latest = getLatestLedgerState();
+      const isFirstReading = !latest.hasPreviousReading;
+      const previousInputValue = document.getElementById('input-prev-reading').value;
+      const prevReading = previousInputValue === '' ? null : Number(previousInputValue);
+      const currentInputValue = document.getElementById('input-curr-reading').value;
+      const currReading = currentInputValue === '' ? 0 : Number(currentInputValue);
+      document.getElementById('input-prev-reading').placeholder = isFirstReading
+        ? translations[state.uiPreferences.lang].firstReadingUnavailable
+        : '';
       const rate = parseFloat(document.getElementById('input-rate').value) || 0;
       const amountPaid = parseFloat(document.getElementById('input-amount-paid').value) || 0;
 
-      const units = Math.max(0, currReading - prevReading);
+      const invalidPrevious = !isFirstReading && (prevReading === null || !Number.isFinite(prevReading));
+      const decreasingReading = !isFirstReading && !invalidPrevious &&
+        currentInputValue !== '' && currReading < prevReading;
+      const readingError = document.getElementById('reading-validation-error');
+      readingError.classList.toggle('hidden', !invalidPrevious && !decreasingReading);
+      readingError.textContent = invalidPrevious
+        ? translations[state.uiPreferences.lang].missingPreviousReadingError
+        : translations[state.uiPreferences.lang].readingLowerError;
+      const units = isFirstReading || invalidPrevious || decreasingReading
+        ? 0
+        : Math.max(0, currReading - prevReading);
       const billCost = units * rate;
 
-      const latest = getLatestLedgerState();
       const prevAdvance = latest.currentAdvance;
       const prevDue = latest.currentDue;
 
@@ -710,12 +758,27 @@
 
     function handleNewPayment(e) {
       e.preventDefault();
-      const prevReading = parseFloat(document.getElementById('input-prev-reading').value);
+      const latest = getLatestLedgerState();
+      const isFirstReading = !latest.hasPreviousReading;
+      const previousInputValue = document.getElementById('input-prev-reading').value;
+      const prevReading = isFirstReading
+        ? null
+        : (previousInputValue === '' ? null : Number(previousInputValue));
       const currReading = parseFloat(document.getElementById('input-curr-reading').value);
       const paymentDate = convertNepaliDateToISO(document.getElementById('input-date').value);
 
-      if (currReading < prevReading) {
-        showToast("Current meter reading cannot be less than previous reading.", "error");
+      if (!Number.isFinite(currReading) || currReading < 0) {
+        showToast("Enter a valid non-negative current meter reading.", "error");
+        return;
+      }
+
+      if (!isFirstReading && (prevReading === null || !Number.isFinite(prevReading) || prevReading < 0)) {
+        showToast(translations[state.uiPreferences.lang].missingPreviousReadingError, "error");
+        return;
+      }
+
+      if (!isFirstReading && currReading < prevReading) {
+        showToast(translations[state.uiPreferences.lang].readingLowerError, "error");
         return;
       }
 
@@ -1044,7 +1107,9 @@
       const latest = getLatestLedgerState();
       document.getElementById('snap-advance').textContent = `Rs. ${latest.currentAdvance.toLocaleString()}`;
       document.getElementById('snap-due').textContent = `Rs. ${latest.currentDue.toLocaleString()}`;
-      document.getElementById('snap-last-reading').textContent = latest.lastReading;
+      document.getElementById('snap-last-reading').textContent = latest.hasPreviousReading
+        ? latest.lastReading
+        : translations[state.uiPreferences.lang].firstReadingUnavailable;
       document.getElementById('snap-rate').textContent = `Rs. ${state.settings.rate} / Unit`;
       document.getElementById('snap-last-date').textContent = formatDateForDisplay(latest.lastDate);
     }
@@ -1221,22 +1286,29 @@
         if (seenIds.has(id)) throw new Error(`Duplicate Record ID "${id}" in the workbook. Resolve duplicates before synchronizing.`);
         seenIds.add(id);
 
-        const previousReading = Number(get('Previous Reading'));
+        const previousReadingValue = get('Previous Reading');
+        const hasPreviousReading = previousReadingValue !== null &&
+          previousReadingValue !== undefined && previousReadingValue !== '';
+        const previousReading = hasPreviousReading ? Number(previousReadingValue) : null;
         const currentReading = Number(get('Current Reading'));
         const rate = Number(get('Rate'));
         const amountPaid = Number(get('Amount Paid'));
         const date = excelDateValue(get('Payment Date (as stored)'));
-        if (!date || ![previousReading, currentReading, rate, amountPaid].every(Number.isFinite) ||
-            previousReading < 0 || currentReading < previousReading || rate < 0 || amountPaid < 0) {
+        if (!date || ![currentReading, rate, amountPaid].every(Number.isFinite) ||
+            (hasPreviousReading && (!Number.isFinite(previousReading) || previousReading < 0 || currentReading < previousReading)) ||
+            currentReading < 0 || rate < 0 || amountPaid < 0) {
           throw new Error(`Invalid date, reading, rate, or amount in workbook row ${rowNumber}. The existing workbook was not changed.`);
         }
+        const unitsValue = get('Units');
         records.push({
           id,
           date,
           receiptNo: String(get('Receipt Number') ?? ''),
           previousReading,
           currentReading,
-          units: Number(get('Units')) || Math.max(0, currentReading - previousReading),
+          units: unitsValue !== null && unitsValue !== undefined && unitsValue !== ''
+            ? Number(unitsValue)
+            : (hasPreviousReading ? Math.max(0, currentReading - previousReading) : 0),
           rate,
           billCost: Number(get('Electricity Cost')) || 0,
           previousAdvance: Number(get('Previous Advance')) || 0,
@@ -1269,12 +1341,17 @@
 
     function sameExcelRecord(appRecord, excelRecord) {
       const numericFields = [
-        'previousReading', 'currentReading', 'units', 'rate', 'billCost',
+        'currentReading', 'units', 'rate', 'billCost',
         'previousAdvance', 'advanceApplied', 'previousDue', 'netPayable',
         'amountPaid', 'newAdvance', 'newDue'
       ];
       return appRecord.date === excelRecord.date &&
         appRecord.receiptNo === excelRecord.receiptNo &&
+        ((appRecord.previousReading === null || appRecord.previousReading === undefined) &&
+          (excelRecord.previousReading === null || excelRecord.previousReading === undefined) ||
+          (appRecord.previousReading !== null && appRecord.previousReading !== undefined &&
+            excelRecord.previousReading !== null && excelRecord.previousReading !== undefined &&
+            Number(appRecord.previousReading) === Number(excelRecord.previousReading))) &&
         numericFields.every(field => Number(appRecord[field]) === Number(excelRecord[field])) &&
         appRecord.status === excelRecord.status &&
         String(appRecord.paymentMethod || 'Cash') === excelRecord.paymentMethod &&
@@ -1288,7 +1365,9 @@
         id: record.id,
         date: record.date,
         receiptNo: record.receiptNo,
-        previousReading: Number(record.previousReading),
+        previousReading: record.previousReading === null || record.previousReading === undefined
+          ? null
+          : Number(record.previousReading),
         currentReading: Number(record.currentReading),
         units: Number(record.units),
         rate: Number(record.rate),
@@ -1523,7 +1602,7 @@
       const method = workbook.addWorksheet('Calculation Method');
       method.addRows([
         ['Field', 'Calculation / Meaning'],
-        ['Units', 'max(0, Current Reading - Previous Reading)'],
+        ['Units', 'If Previous Reading is blank (first reading), 0; otherwise max(0, Current Reading - Previous Reading). A blank reading is distinct from an actual zero reading.'],
         ['Electricity Cost', 'Units × Rate'],
         ['Advance Applied', 'min(Previous Advance, Electricity Cost)'],
         ['Amount Required', '(Electricity Cost - Advance Applied) + Previous Due'],
@@ -1883,7 +1962,13 @@
       document.getElementById('receipt-print-label').textContent = 'Print Receipt';
       document.getElementById('rcpt-no').textContent = rec.receiptNo;
       document.getElementById('rcpt-date').textContent = formatDateForDisplay(rec.date);
-      document.getElementById('rcpt-prev-reading').textContent = rec.previousReading;
+      const isFirstReading = rec.previousReading === null || rec.previousReading === undefined || rec.previousReading === '';
+      document.getElementById('rcpt-prev-reading').textContent = isFirstReading
+        ? translations[state.uiPreferences.lang].firstReadingUnavailable
+        : rec.previousReading;
+      document.getElementById('rcpt-reading-type').textContent = isFirstReading
+        ? translations[state.uiPreferences.lang].readingTypeFirst
+        : translations[state.uiPreferences.lang].readingTypeNormal;
       document.getElementById('rcpt-curr-reading').textContent = rec.currentReading;
       document.getElementById('rcpt-units').textContent = rec.units;
       document.getElementById('rcpt-rate').textContent = `Rs. ${rec.rate}`;
