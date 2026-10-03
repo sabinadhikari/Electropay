@@ -259,6 +259,9 @@
     let activeCustomerId = '';
     let paymentSaveInProgress = false;
     let viewedCustomerId = '';
+    let recordsCurrentPage = 1;
+    let recordsSearchDebounceTimer = null;
+    const RECORDS_PAGE_SIZE = 25;
 
     function makeId(prefix) {
       return `${prefix}-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
@@ -1325,36 +1328,437 @@
     /* ==========================================================================
        9. PAYMENT RECORDS TABLE & ACTIONS
        ========================================================================== */
+    function setDynamicSelectOptions(select, allLabel, values, selectedValue) {
+      select.replaceChildren();
+      const allOption = document.createElement('option');
+      allOption.value = '';
+      allOption.textContent = allLabel;
+      select.appendChild(allOption);
+      values.forEach(({ value, label }) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+      });
+      select.value = values.some(item => item.value === selectedValue) ? selectedValue : '';
+    }
+
+    function updateRecordsFilterOptions() {
+      const customerSelect = document.getElementById('records-customer-filter');
+      const statusSelect = document.getElementById('records-status-filter');
+      const methodSelect = document.getElementById('records-method-filter');
+      const locationSelect = document.getElementById('records-location-filter');
+      const customerValue = customerSelect.value;
+      const statusValue = statusSelect.value;
+      const methodValue = methodSelect.value;
+      const locationValue = locationSelect.value;
+      const customerQuery = document.getElementById('records-customer-search').value.trim().toLocaleLowerCase();
+
+      setDynamicSelectOptions(customerSelect, 'All customers', state.customers
+        .filter(customer => !customerQuery ||
+          `${customer.customerName} ${customer.contactNumber} ${customer.location}`.toLocaleLowerCase().includes(customerQuery))
+        .map(customer => ({ value: customer.id, label: customerDisplayName(customer) }))
+        .sort((a, b) => a.label.localeCompare(b.label)), customerValue);
+
+      const statuses = [...new Set(state.records.map(record => record.status).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      setDynamicSelectOptions(statusSelect, 'All statuses', statuses.map(value => ({
+        value,
+        label: value.charAt(0) + value.slice(1).toLowerCase()
+      })), statusValue);
+
+      const methods = [...new Set([
+        ...(Array.isArray(state.settings.paymentMethods) ? state.settings.paymentMethods : []),
+        ...state.records.map(record => record.paymentMethod).filter(Boolean)
+      ])].sort((a, b) => a.localeCompare(b));
+      setDynamicSelectOptions(methodSelect, 'All methods', methods.map(value => ({ value, label: value })), methodValue);
+
+      const locations = [...new Set(state.customers.map(customer => customer.location?.trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      setDynamicSelectOptions(locationSelect, 'All locations', locations.map(value => ({ value, label: value })), locationValue);
+    }
+
+    function getRecordDateISO(record) {
+      const value = String(record.date ?? '').trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? '' : toLocalDateISO(parsed);
+    }
+
+    function toLocalDateISO(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function getDatePresetRange(preset) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const start = new Date(today);
+      const end = new Date(today);
+      const day = today.getDay();
+      const mondayOffset = (day + 6) % 7;
+
+      switch (preset) {
+        case 'today':
+          break;
+        case 'yesterday':
+          start.setDate(start.getDate() - 1);
+          end.setDate(end.getDate() - 1);
+          break;
+        case 'this-week':
+          start.setDate(start.getDate() - mondayOffset);
+          break;
+        case 'last-week':
+          start.setDate(start.getDate() - mondayOffset - 7);
+          end.setDate(end.getDate() - mondayOffset - 1);
+          break;
+        case 'this-month':
+          start.setDate(1);
+          break;
+        case 'last-month':
+          start.setDate(1);
+          start.setMonth(start.getMonth() - 1);
+          end.setDate(0);
+          break;
+        case 'this-year':
+          start.setMonth(0, 1);
+          break;
+        case 'last-year':
+          start.setFullYear(start.getFullYear() - 1, 0, 1);
+          end.setFullYear(end.getFullYear() - 1, 11, 31);
+          break;
+        default:
+          return null;
+      }
+      return { from: toLocalDateISO(start), to: toLocalDateISO(end) };
+    }
+
+    function getRecordsFilterRange(key) {
+      const minValue = document.getElementById(`records-${key}-min`)?.value;
+      const maxValue = document.getElementById(`records-${key}-max`)?.value;
+      return {
+        min: minValue === '' || minValue === undefined ? null : Number(minValue),
+        max: maxValue === '' || maxValue === undefined ? null : Number(maxValue)
+      };
+    }
+
+    function getRecordsRangeFilterKeys() {
+      return Array.from(document.querySelectorAll('.records-range-filter')).map(element => element.dataset.rangeKey);
+    }
+
+    function initializeRecordsRangeInputs() {
+      document.querySelectorAll('.records-range-filter').forEach(container => {
+        if (container.childElementCount) return;
+        const label = document.createElement('span');
+        label.textContent = container.dataset.rangeLabel;
+        const inputs = document.createElement('div');
+        inputs.className = 'mt-1 flex gap-2';
+        ['min', 'max'].forEach(bound => {
+          const input = document.createElement('input');
+          input.id = `records-${container.dataset.rangeKey}-${bound}`;
+          input.type = 'number';
+          input.min = '0';
+          input.step = 'any';
+          input.placeholder = bound === 'min' ? 'Min' : 'Max';
+          input.setAttribute('aria-label', `${bound === 'min' ? 'Minimum' : 'Maximum'} ${container.dataset.rangeLabel}`);
+          input.className = 'min-w-0 w-1/2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm';
+          input.addEventListener('input', handleRecordsFilterChange);
+          inputs.appendChild(input);
+        });
+        container.append(label, inputs);
+      });
+    }
+
+    function matchesRecordsRange(value, range) {
+      if (range.min !== null && (!Number.isFinite(range.min) || value < range.min)) return false;
+      if (range.max !== null && (!Number.isFinite(range.max) || value > range.max)) return false;
+      return true;
+    }
+
+    function getFilteredPaymentRecords() {
+      const query = document.getElementById('records-search')?.value.trim().toLocaleLowerCase() || '';
+      const customerId = document.getElementById('records-customer-filter')?.value || '';
+      const status = document.getElementById('records-status-filter')?.value || '';
+      const method = document.getElementById('records-method-filter')?.value || '';
+      const location = document.getElementById('records-location-filter')?.value || '';
+      const datePreset = document.getElementById('records-date-preset')?.value || '';
+      const presetRange = getDatePresetRange(datePreset);
+      const dateFrom = datePreset === 'custom'
+        ? document.getElementById('records-date-from').value
+        : presetRange?.from || '';
+      const dateTo = datePreset === 'custom'
+        ? document.getElementById('records-date-to').value
+        : presetRange?.to || '';
+      const amountRange = getRecordsFilterRange('amount-paid');
+      const rangeKeys = getRecordsRangeFilterKeys();
+
+      const filtered = state.records.filter(record => {
+        const customer = getCustomerForRecord(record);
+        if (customerId && record.customerId !== customerId) return false;
+        if (status && record.status !== status) return false;
+        if (method && (record.paymentMethod || '') !== method) return false;
+        if (location && (customer?.location?.trim() || '') !== location) return false;
+
+        const recordDate = getRecordDateISO(record);
+        if (dateFrom && (!recordDate || recordDate < dateFrom)) return false;
+        if (dateTo && (!recordDate || recordDate > dateTo)) return false;
+        if (!matchesRecordsRange(Number(record.amountPaid || 0), amountRange)) return false;
+
+        for (const key of rangeKeys) {
+          const range = getRecordsFilterRange(key);
+          if (range.min === null && range.max === null) continue;
+          const rawValue = record[key];
+          if (rawValue === null || rawValue === undefined || rawValue === '') return false;
+          if (!matchesRecordsRange(Number(rawValue), range)) return false;
+        }
+
+        if (query) {
+          const searchableValues = [
+            ...Object.values(customer || {}),
+            ...Object.entries(record)
+              .filter(([key]) => key !== 'customerId')
+              .map(([, value]) => value)
+          ];
+          const searchable = `${searchableValues.filter(value =>
+            value === null || ['string', 'number'].includes(typeof value)
+          ).join(' ')} ${formatDateForDisplay(record.date)}`.toLocaleLowerCase();
+          if (!searchable.includes(query)) return false;
+        }
+        return true;
+      });
+
+      const sort = document.getElementById('records-sort')?.value || 'newest';
+      filtered.sort((a, b) => {
+        switch (sort) {
+          case 'oldest':
+            return getRecordDateISO(a).localeCompare(getRecordDateISO(b));
+          case 'amount-high':
+            return Number(b.amountPaid || 0) - Number(a.amountPaid || 0);
+          case 'amount-low':
+            return Number(a.amountPaid || 0) - Number(b.amountPaid || 0);
+          case 'customer-az':
+            return customerDisplayName(getCustomerForRecord(a)).localeCompare(customerDisplayName(getCustomerForRecord(b)));
+          case 'customer-za':
+            return customerDisplayName(getCustomerForRecord(b)).localeCompare(customerDisplayName(getCustomerForRecord(a)));
+          default:
+            return getRecordDateISO(b).localeCompare(getRecordDateISO(a));
+        }
+      });
+      return filtered;
+    }
+
+    function handleRecordsSearchInput() {
+      recordsCurrentPage = 1;
+      window.clearTimeout(recordsSearchDebounceTimer);
+      recordsSearchDebounceTimer = window.setTimeout(renderRecordsTable, 180);
+    }
+
+    function handleRecordsCustomerSearchInput() {
+      recordsCurrentPage = 1;
+      renderRecordsTable();
+    }
+
+    function handleRecordsFilterChange() {
+      recordsCurrentPage = 1;
+      renderRecordsTable();
+    }
+
+    function handleRecordsDatePresetChange() {
+      const isCustom = document.getElementById('records-date-preset').value === 'custom';
+      document.querySelectorAll('.records-custom-date').forEach(input => input.classList.toggle('hidden', !isCustom));
+      handleRecordsFilterChange();
+    }
+
+    function toggleRecordsFilters() {
+      const panel = document.getElementById('records-filter-panel');
+      const button = document.getElementById('records-filter-toggle');
+      const opening = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', !opening);
+      button.setAttribute('aria-expanded', String(opening));
+    }
+
+    function clearRecordsSearch() {
+      document.getElementById('records-search').value = '';
+      handleRecordsSearchInput();
+    }
+
+    function clearRecordFilter(key) {
+      if (key === 'search') {
+        document.getElementById('records-search').value = '';
+      } else if (key === 'amount-paid') {
+        document.getElementById('records-amount-paid-min').value = '';
+        document.getElementById('records-amount-paid-max').value = '';
+      } else if (key === 'date') {
+        document.getElementById('records-date-preset').value = '';
+        document.getElementById('records-date-from').value = '';
+        document.getElementById('records-date-to').value = '';
+      } else if (key === 'customer') {
+        document.getElementById('records-customer-search').value = '';
+        document.getElementById('records-customer-filter').value = '';
+      } else if (key.startsWith('range:')) {
+        const rangeKey = key.slice('range:'.length);
+        document.getElementById(`records-${rangeKey}-min`).value = '';
+        document.getElementById(`records-${rangeKey}-max`).value = '';
+      } else {
+        const control = document.getElementById(`records-${key}-filter`);
+        if (control) control.value = '';
+      }
+      if (key === 'date') handleRecordsDatePresetChange();
+      else handleRecordsFilterChange();
+    }
+
+    function clearAllRecordFilters() {
+      document.getElementById('records-search').value = '';
+      ['customer', 'status', 'method', 'location'].forEach(key => {
+        document.getElementById(`records-${key}-filter`).value = '';
+      });
+      document.getElementById('records-customer-search').value = '';
+      document.getElementById('records-date-preset').value = '';
+      document.getElementById('records-date-from').value = '';
+      document.getElementById('records-date-to').value = '';
+      document.getElementById('records-amount-paid-min').value = '';
+      document.getElementById('records-amount-paid-max').value = '';
+      document.getElementById('records-sort').value = 'newest';
+      getRecordsRangeFilterKeys().forEach(key => {
+        document.getElementById(`records-${key}-min`).value = '';
+        document.getElementById(`records-${key}-max`).value = '';
+      });
+      document.querySelectorAll('.records-custom-date').forEach(input => input.classList.add('hidden'));
+      handleRecordsFilterChange();
+    }
+
+    function renderActiveRecordFilters() {
+      const container = document.getElementById('records-active-filters');
+      const chips = [];
+      const search = document.getElementById('records-search').value.trim();
+      if (search) chips.push({ key: 'search', label: `Search: ${search}` });
+
+      const customerId = document.getElementById('records-customer-filter').value;
+      if (customerId) chips.push({ key: 'customer', label: `Customer: ${customerDisplayName(getCustomer(customerId))}` });
+      const status = document.getElementById('records-status-filter').value;
+      if (status) chips.push({ key: 'status', label: `Status: ${status}` });
+      const method = document.getElementById('records-method-filter').value;
+      if (method) chips.push({ key: 'method', label: `Method: ${method}` });
+      const location = document.getElementById('records-location-filter').value;
+      if (location) chips.push({ key: 'location', label: `Location: ${location}` });
+
+      const preset = document.getElementById('records-date-preset').value;
+      if (preset) {
+        const select = document.getElementById('records-date-preset');
+        const dateLabel = preset === 'custom'
+          ? `Date: ${document.getElementById('records-date-from').value || '…'} – ${document.getElementById('records-date-to').value || '…'}`
+          : `Date: ${select.options[select.selectedIndex].text}`;
+        chips.push({ key: 'date', label: dateLabel });
+      }
+
+      const amountRange = getRecordsFilterRange('amount-paid');
+      if (amountRange.min !== null || amountRange.max !== null) {
+        chips.push({ key: 'amount-paid', label: `Paid: ${amountRange.min ?? 'Any'} – ${amountRange.max ?? 'Any'}` });
+      }
+      getRecordsRangeFilterKeys().forEach(key => {
+        const range = getRecordsFilterRange(key);
+        if (range.min === null && range.max === null) return;
+        const label = document.querySelector(`[data-range-key="${key}"]`).dataset.rangeLabel;
+        chips.push({ key: `range:${key}`, label: `${label}: ${range.min ?? 'Any'} – ${range.max ?? 'Any'}` });
+      });
+
+      container.replaceChildren();
+      container.classList.toggle('hidden', chips.length === 0);
+      chips.forEach(chip => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1 text-xs font-medium text-emerald-800 dark:text-emerald-200';
+        button.setAttribute('aria-label', `Remove ${chip.label} filter`);
+        const text = document.createElement('span');
+        text.textContent = chip.label;
+        const icon = document.createElement('i');
+        icon.dataset.lucide = 'x';
+        icon.className = 'h-3 w-3';
+        button.append(text, icon);
+        button.addEventListener('click', () => clearRecordFilter(chip.key));
+        container.appendChild(button);
+      });
+      if (chips.length) {
+        const clearButton = document.createElement('button');
+        clearButton.type = 'button';
+        clearButton.className = 'px-2 py-1 text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-white';
+        clearButton.textContent = 'Clear All Filters';
+        clearButton.addEventListener('click', clearAllRecordFilters);
+        container.appendChild(clearButton);
+      }
+    }
+
+    function changeRecordsPage(offset) {
+      recordsCurrentPage += offset;
+      renderRecordsTable();
+    }
+
     function renderRecordsTable() {
       const tbody = document.getElementById('records-tbody');
-      const query = document.getElementById('records-search')?.value.toLowerCase() || '';
-      tbody.innerHTML = '';
+      tbody.replaceChildren();
+      initializeRecordsRangeInputs();
+      updateRecordsFilterOptions();
+      const searchInput = document.getElementById('records-search');
+      const clearSearch = document.getElementById('clear-records-search');
+      clearSearch.classList.toggle('hidden', !searchInput.value);
+      const filtered = getFilteredPaymentRecords();
 
-      const currentRecordIds = new Set(state.records.map(record => record.id));
+      const filteredRecordIds = new Set(filtered.map(record => record.id));
       selectedPaymentIds.forEach(id => {
-        if (!currentRecordIds.has(id)) selectedPaymentIds.delete(id);
-      });
-      const filtered = state.records.filter(r => {
-        const customer = getCustomerForRecord(r);
-        const searchable = `${customer?.customerName || ''} ${customer?.contactNumber || ''} ${customer?.location || ''} ${r.receiptNo} ${r.date} ${formatDateForDisplay(r.date)}`.toLocaleLowerCase();
-        return searchable.includes(query);
+        if (!filteredRecordIds.has(id)) selectedPaymentIds.delete(id);
       });
 
-      document.getElementById('records-count').textContent = `Showing ${filtered.length} of ${state.records.length} records`;
+      const pageCount = Math.max(1, Math.ceil(filtered.length / RECORDS_PAGE_SIZE));
+      recordsCurrentPage = Math.min(Math.max(recordsCurrentPage, 1), pageCount);
+      const startIndex = (recordsCurrentPage - 1) * RECORDS_PAGE_SIZE;
+      const visibleRecords = filtered.slice(startIndex, startIndex + RECORDS_PAGE_SIZE);
+      const totalPaid = filtered.reduce((sum, record) => sum + Number(record.amountPaid || 0), 0);
+
+      document.getElementById('records-count').textContent =
+        `${filtered.length.toLocaleString()} ${filtered.length === 1 ? 'payment record' : 'payment records'} found`;
+      document.getElementById('records-financial-summary').textContent =
+        `Total paid: Rs. ${formatReceiptAmount(totalPaid)}`;
+      renderActiveRecordFilters();
       updatePaymentSelectionSummary(filtered);
 
+      const pagination = document.getElementById('records-pagination');
+      pagination.classList.toggle('hidden', filtered.length <= RECORDS_PAGE_SIZE);
+      pagination.classList.toggle('flex', filtered.length > RECORDS_PAGE_SIZE);
+      document.getElementById('records-page-summary').textContent = filtered.length
+        ? `Showing ${startIndex + 1}–${Math.min(startIndex + visibleRecords.length, filtered.length)} of ${filtered.length.toLocaleString()} payments`
+        : 'Showing 0 payments';
+      document.getElementById('records-page-number').textContent = `Page ${recordsCurrentPage} of ${pageCount}`;
+      document.getElementById('records-previous-page').disabled = recordsCurrentPage <= 1;
+      document.getElementById('records-next-page').disabled = recordsCurrentPage >= pageCount;
+
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="12" class="px-4 py-8 text-center text-xs text-gray-400">No payment records found.</td></tr>`;
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 12;
+        cell.className = 'px-4 py-12 text-center';
+        cell.innerHTML = `<i data-lucide="search-x" class="mx-auto h-8 w-8 text-gray-300 dark:text-gray-600"></i>
+          <p class="mt-3 text-sm font-semibold text-gray-700 dark:text-gray-200">No payment records found</p>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Try changing your search or clearing one or more filters.</p>
+          <button type="button" onclick="clearAllRecordFilters()" class="mt-3 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:underline">Clear Filters</button>`;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        lucide.createIcons();
         return;
       }
 
-      [...filtered].reverse().forEach(r => {
+      visibleRecords.forEach(r => {
         const customer = getCustomerForRecord(r);
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors';
         tr.innerHTML = `
           <td class="px-4 py-3 text-center"></td>
-          <td class="px-4 py-3 font-semibold">${escapeHtml(customerDisplayName(customer))}</td>
+          <td class="px-4 py-3">
+            <span class="font-semibold">${escapeHtml(customerDisplayName(customer))}</span>
+            ${customer?.contactNumber?.trim() ? `<span class="block text-xs text-gray-500 dark:text-gray-400">${escapeHtml(customer.contactNumber)}</span>` : ''}
+            ${customer?.location?.trim() ? `<span class="block text-xs text-gray-500 dark:text-gray-400">${escapeHtml(customer.location)}</span>` : ''}
+          </td>
           <td class="px-4 py-3 font-mono text-[10px] font-semibold">${escapeHtml(r.receiptNo)}</td>
           <td class="px-4 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
           <td class="px-4 py-3 text-xs">${escapeHtml(r.paymentMethod || '—')}</td>
@@ -1388,15 +1792,6 @@
         tbody.appendChild(tr);
       });
       lucide.createIcons();
-    }
-
-    function getFilteredPaymentRecords() {
-      const query = document.getElementById('records-search')?.value.toLowerCase() || '';
-      return state.records.filter(record => {
-        const customer = getCustomerForRecord(record);
-        const searchable = `${customer?.customerName || ''} ${customer?.contactNumber || ''} ${customer?.location || ''} ${record.receiptNo} ${record.date} ${formatDateForDisplay(record.date)}`.toLocaleLowerCase();
-        return searchable.includes(query);
-      });
     }
 
     function formatReceiptAmount(amount) {
