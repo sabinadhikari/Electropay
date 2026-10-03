@@ -233,30 +233,72 @@
       }
     }
 
-    function formatNepaliDateTime(dateValue = new Date()) {
+    function formatNepaliDate(dateValue = new Date()) {
       try {
         const NepaliDateCtor = typeof window !== 'undefined' && (
           (typeof window.NepaliDate === 'function' ? window.NepaliDate : window.NepaliDate?.default)
         );
 
         if (!NepaliDateCtor) {
-          return new Date(dateValue).toLocaleString('en-GB', { hour12: false });
+          return new Date(dateValue).toLocaleDateString('en-GB');
         }
 
         const adDate = new Date(dateValue);
-        const nepaliDate = new NepaliDateCtor(adDate).format('YYYY-MM-DD');
-        const timeString = adDate.toLocaleTimeString('en-GB', { hour12: false });
-        return `${nepaliDate} ${timeString} BS`;
+        return `${new NepaliDateCtor(adDate).format('YYYY-MM-DD')} BS`;
       } catch (error) {
-        console.warn('Could not format Nepali date-time:', error);
-        return new Date(dateValue).toLocaleString('en-GB', { hour12: false });
+        console.warn('Could not format Nepali date:', error);
+        return new Date(dateValue).toLocaleDateString('en-GB');
+      }
+    }
+
+    function convertNepaliDateToISO(dateValue) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateValue ?? '').trim());
+      const NepaliDateCtor = typeof window !== 'undefined' && (
+        (typeof window.NepaliDate === 'function' ? window.NepaliDate : window.NepaliDate?.default)
+      );
+
+      if (!match || !NepaliDateCtor) return null;
+
+      const [, yearText, monthText, dayText] = match;
+      const year = Number(yearText);
+      const month = Number(monthText);
+      const day = Number(dayText);
+
+      try {
+        const nepaliDate = new NepaliDateCtor(year, month - 1, day);
+        const bs = nepaliDate.getBS();
+        if (bs.year !== year || bs.month !== month - 1 || bs.date !== day) return null;
+
+        const ad = nepaliDate.getAD();
+        return `${String(ad.year).padStart(4, '0')}-${String(ad.month + 1).padStart(2, '0')}-${String(ad.date).padStart(2, '0')}`;
+      } catch (error) {
+        console.warn('Could not convert payment date from Nepali BS:', error);
+        return null;
+      }
+    }
+
+    function formatNepaliTime(dateValue = new Date()) {
+      try {
+        return new Date(dateValue).toLocaleTimeString('en-GB', { hour12: false });
+      } catch (error) {
+        console.warn('Could not format time:', error);
+        return '00:00:00';
       }
     }
 
     function updateHeaderNepaliDateTime() {
-      const element = document.getElementById('header-nepali-datetime');
-      if (!element) return;
-      element.textContent = formatNepaliDateTime(new Date());
+      const dateElement = document.getElementById('header-nepali-date');
+      const timeElement = document.getElementById('header-nepali-time');
+
+      if (dateElement) {
+        const dateText = dateElement.querySelector('span');
+        if (dateText) dateText.textContent = formatNepaliDate(new Date());
+      }
+
+      if (timeElement) {
+        const timeText = timeElement.querySelector('span');
+        if (timeText) timeText.textContent = formatNepaliTime(new Date());
+      }
     }
 
     // Chart instances store
@@ -571,7 +613,7 @@
        ========================================================================== */
     function setupNewPaymentForm() {
       const latest = getLatestLedgerState();
-      document.getElementById('input-date').value = new Date().toISOString().split('T')[0];
+      document.getElementById('input-date').value = formatNepaliDate().replace(/ BS$/, '');
       document.getElementById('input-prev-reading').value = latest.lastReading;
       document.getElementById('input-curr-reading').value = latest.lastReading;
       document.getElementById('input-rate').value = state.settings.rate;
@@ -670,16 +712,22 @@
       e.preventDefault();
       const prevReading = parseFloat(document.getElementById('input-prev-reading').value);
       const currReading = parseFloat(document.getElementById('input-curr-reading').value);
+      const paymentDate = convertNepaliDateToISO(document.getElementById('input-date').value);
 
       if (currReading < prevReading) {
         showToast("Current meter reading cannot be less than previous reading.", "error");
         return;
       }
 
+      if (!paymentDate) {
+        showToast("Enter a valid Nepali BS date in YYYY-MM-DD format.", "error");
+        return;
+      }
+
       const newRecord = {
         id: `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
         createdAt: new Date().toISOString(),
-        date: document.getElementById('input-date').value,
+        date: paymentDate,
         paymentMethod: document.getElementById('input-method').value,
         previousReading: prevReading,
         currentReading: currReading,
