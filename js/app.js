@@ -233,6 +233,32 @@
       }
     }
 
+    function formatNepaliDateTime(dateValue = new Date()) {
+      try {
+        const NepaliDateCtor = typeof window !== 'undefined' && (
+          (typeof window.NepaliDate === 'function' ? window.NepaliDate : window.NepaliDate?.default)
+        );
+
+        if (!NepaliDateCtor) {
+          return new Date(dateValue).toLocaleString('en-GB', { hour12: false });
+        }
+
+        const adDate = new Date(dateValue);
+        const nepaliDate = new NepaliDateCtor(adDate).format('YYYY-MM-DD');
+        const timeString = adDate.toLocaleTimeString('en-GB', { hour12: false });
+        return `${nepaliDate} ${timeString} BS`;
+      } catch (error) {
+        console.warn('Could not format Nepali date-time:', error);
+        return new Date(dateValue).toLocaleString('en-GB', { hour12: false });
+      }
+    }
+
+    function updateHeaderNepaliDateTime() {
+      const element = document.getElementById('header-nepali-datetime');
+      if (!element) return;
+      element.textContent = formatNepaliDateTime(new Date());
+    }
+
     // Chart instances store
     let activeCharts = {
       consumption: null,
@@ -250,6 +276,8 @@
       rebuildLedger();
       switchTab('dashboard');
       lucide.createIcons();
+      updateHeaderNepaliDateTime();
+      window.setInterval(updateHeaderNepaliDateTime, 1000);
       void updateExcelBackupLocationStatus();
 
       // Register print cleanup event listener
