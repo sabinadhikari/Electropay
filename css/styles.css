@@ -1,0 +1,261 @@
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.4); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.6); }
+
+    .nav-item {
+      position: relative;
+    }
+
+    .nav-item > svg {
+      width: 2rem;
+      height: 2rem;
+      padding: 0.45rem;
+      border-radius: 0.65rem;
+      background: rgba(148, 163, 184, 0.1);
+      transition: background-color 180ms ease, color 180ms ease, transform 180ms ease;
+    }
+
+    .nav-item:hover > svg {
+      transform: translateX(2px);
+    }
+
+    .nav-item-active {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.13), rgba(16, 185, 129, 0.04)) !important;
+      box-shadow: inset 3px 0 0 #10b981;
+    }
+
+    .nav-item-active > svg {
+      background: #10b981;
+      color: white;
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .section-label > svg {
+      color: #10b981;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .field-label > svg {
+      width: 0.875rem;
+      height: 0.875rem;
+      color: #059669;
+    }
+
+    .payment-helper {
+      animation: helper-appear 160ms ease-out;
+    }
+
+    @keyframes helper-appear {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    #receipt-card {
+      max-width: 760px;
+      margin: 0 auto;
+      overflow: hidden;
+    }
+
+    .receipt-hero {
+      background: linear-gradient(120deg, #047857, #059669 58%, #10b981);
+    }
+
+    .receipt-section {
+      break-inside: avoid;
+    }
+
+    #combined-receipt-card {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .combined-receipt-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .combined-receipt-table th,
+    .combined-receipt-table td {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+    }
+
+    .combined-receipt-table th:last-child,
+    .combined-receipt-table td.amount {
+      text-align: right;
+    }
+
+    .combined-receipt-table thead {
+      background: #f1f5f9;
+    }
+
+    .combined-receipt-table tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    /* Print Styles */
+    @page {
+      size: A4 portrait;
+      margin: 8mm;
+    }
+
+    @media print {
+      html,
+      body {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        background: white !important;
+      }
+
+      body * {
+        visibility: hidden !important;
+      }
+
+      main,
+      #tab-receipt {
+        display: block !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      #print-wrapper, #print-wrapper * {
+        visibility: visible !important;
+      }
+      #print-wrapper {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+        color: black !important;
+        box-shadow: none !important;
+        box-sizing: border-box !important;
+      }
+      body.printing-combined-receipt #print-wrapper {
+        position: static !important;
+        left: auto !important;
+        top: auto !important;
+      }
+      #receipt-card {
+        width: 100% !important;
+        max-width: none !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        font-size: 9pt !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+      }
+      #combined-receipt-card {
+        width: 100% !important;
+        max-width: none !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        font-size: 9pt !important;
+      }
+      #combined-receipt-card .combined-receipt-hero {
+        padding: 5mm 7mm !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      #combined-receipt-card .combined-receipt-content {
+        padding: 5mm 7mm !important;
+      }
+      #combined-receipt-card .combined-receipt-table th,
+      #combined-receipt-card .combined-receipt-table td {
+        padding: 2.2mm 2.5mm !important;
+      }
+      #combined-receipt-card .combined-receipt-total,
+      #combined-receipt-card .combined-receipt-summary {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+      }
+      #combined-receipt-card .combined-receipt-table thead {
+        display: table-header-group !important;
+      }
+      #combined-receipt-card .combined-receipt-table tr {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+      }
+      .receipt-hero {
+        padding: 5mm 7mm !important;
+      }
+      #receipt-card > .p-5 {
+        padding: 5mm 7mm !important;
+        gap: 4mm !important;
+      }
+      #receipt-card .receipt-paid-summary {
+        padding: 3mm 5mm !important;
+      }
+      #receipt-card .receipt-section {
+        padding: 3mm 4mm !important;
+      }
+      #receipt-card .receipt-section h4 {
+        padding-bottom: 2mm !important;
+        margin-bottom: 2mm !important;
+      }
+      #receipt-card .receipt-section .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+        margin-top: 2mm !important;
+      }
+      #receipt-card .receipt-paid-summary,
+      #receipt-card .receipt-section,
+      #receipt-card > .receipt-hero,
+      .receipt-paid-summary {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      #receipt-card > .p-5 > .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 3mm !important;
+      }
+      #receipt-card .receipt-section .w-8.h-8 {
+        width: 7mm !important;
+        height: 7mm !important;
+      }
+      #receipt-card > .p-5.space-y-6 > :not([hidden]) ~ :not([hidden]) {
+        gap: 4mm !important;
+        margin-top: 4mm !important;
+      }
+      #receipt-card .text-xl,
+      #receipt-card .sm\:text-2xl {
+        font-size: 15pt !important;
+      }
+      #receipt-card .receipt-hero .w-14 {
+        width: 10mm !important;
+        height: 10mm !important;
+      }
+      #receipt-card .receipt-section,
+      #receipt-card .receipt-paid-summary,
+      #receipt-card .receipt-hero,
+      #receipt-card > .p-5 > .border-t {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }

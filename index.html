@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Electricity Payment Management System</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Excel workbook generation and recovery -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              900: '#14532d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 transition-colors duration-200 antialiased font-sans flex h-screen overflow-hidden">
+
+  <!-- MOBILE OVERLAY -->
+  <div id="mobile-overlay" class="fixed inset-0 bg-black/50 z-40 hidden md:hidden" onclick="toggleSidebar(false)"></div>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-transform duration-300 transform -translate-x-full md:translate-x-0 shrink-0">
+    <div class="p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-emerald-500 text-white rounded-lg shadow-sm">
+          <i data-lucide="zap" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-gray-900 dark:text-white leading-tight text-sm uppercase tracking-wider" data-i18n="appName">ElectroPay</h1>
+          <p class="text-xs text-gray-500 dark:text-gray-400" data-i18n="appSubTitle">Ledger & Billing</p>
+        </div>
+      </div>
+      <button class="md:hidden text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white" onclick="toggleSidebar(false)">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="flex-1 overflow-y-auto p-4 space-y-6">
+      <div>
+        <p class="section-label px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2"><i data-lucide="sparkles" class="w-3.5 h-3.5" aria-hidden="true"></i><span data-i18n="navMain">MAIN</span></p>
+        <div class="space-y-1">
+          <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+            <span data-i18n="navDashboard">Dashboard</span>
+          </button>
+          <button onclick="switchTab('new-payment')" id="nav-new-payment" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+            <span data-i18n="navNewPayment">New Payment</span>
+          </button>
+          <button onclick="switchTab('records')" id="nav-records" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="receipt" class="w-4 h-4"></i>
+            <span data-i18n="navPaymentRecords">Payment Records</span>
+          </button>
+          <button onclick="switchTab('analytics')" id="nav-analytics" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+            <span data-i18n="navAnalytics">Analytics</span>
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <p class="section-label px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2"><i data-lucide="landmark" class="w-3.5 h-3.5" aria-hidden="true"></i><span data-i18n="navFinancial">FINANCIAL</span></p>
+        <div class="space-y-1">
+          <button onclick="switchTab('snapshot')" id="nav-snapshot" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="scale" class="w-4 h-4"></i>
+            <span data-i18n="navAdvancesDue">Advances & Due</span>
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <p class="section-label px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2"><i data-lucide="sliders-horizontal" class="w-3.5 h-3.5" aria-hidden="true"></i><span data-i18n="navSystem">SYSTEM</span></p>
+        <div class="space-y-1">
+          <button onclick="switchTab('backup')" id="nav-backup" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="database" class="w-4 h-4"></i>
+            <span data-i18n="navBackupRestore">Backup / Restore</span>
+          </button>
+          <button onclick="switchTab('settings')" id="nav-settings" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+            <i data-lucide="settings" class="w-4 h-4"></i>
+            <span data-i18n="navSettings">Settings</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Sidebar Bottom Controls -->
+    <div class="p-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+      <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+        <span data-i18n="sidebarStatus">System Ready</span>
+        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <!-- Language Toggle -->
+        <button onclick="toggleLanguage()" class="flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <i data-lucide="languages" class="w-3.5 h-3.5"></i>
+          <span id="lang-label">EN</span>
+        </button>
+        <!-- Theme Toggle -->
+        <button onclick="toggleTheme()" class="flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <i id="theme-icon" data-lucide="sun" class="w-3.5 h-3.5"></i>
+          <span id="theme-label" data-i18n="themeLight">Light</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT AREA -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden">
+    <!-- TOP HEADER -->
+    <header class="h-16 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 md:px-8 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-3">
+        <button onclick="toggleSidebar(true)" class="md:hidden p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+        <div>
+          <div class="flex items-center gap-2.5">
+            <span id="page-title-icon-container" class="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"><i data-lucide="layout-dashboard" class="w-4 h-4" aria-hidden="true"></i></span>
+            <h2 id="page-title" class="text-lg font-bold text-gray-900 dark:text-white leading-tight">Dashboard</h2>
+          </div>
+          <p id="page-desc" class="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">Overview of electricity payment metrics</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-medium border border-emerald-200 dark:border-emerald-800">
+          <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+          <span data-i18n="ledgerSynced">Ledger Synced</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- CONTENT BODY -->
+    <main class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
+
+      <!-- DASHBOARD TAB -->
+      <section id="tab-dashboard" class="tab-content space-y-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="group bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400 mb-3"><i data-lucide="receipt" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="kpiTotalBilled">Total Billed</p>
+            <h3 id="dash-total-billed" class="text-2xl font-bold mt-2 text-gray-900 dark:text-white">Rs. 0</h3>
+          </div>
+          <div class="group bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 mb-3"><i data-lucide="badge-check" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="kpiTotalCollected">Total Collected</p>
+            <h3 id="dash-total-paid" class="text-2xl font-bold mt-2 text-emerald-600 dark:text-emerald-400">Rs. 0</h3>
+          </div>
+          <div class="group bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400 mb-3"><i data-lucide="triangle-alert" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="kpiOutstandingDue">Outstanding Due</p>
+            <h3 id="dash-current-due" class="text-2xl font-bold mt-2 text-amber-600 dark:text-amber-400">Rs. 0</h3>
+          </div>
+          <div class="group bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400 mb-3"><i data-lucide="wallet" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="kpiAdvanceBalance">Advance Balance</p>
+            <h3 id="dash-current-advance" class="text-2xl font-bold mt-2 text-blue-600 dark:text-blue-400">Rs. 0</h3>
+          </div>
+        </div>
+
+        <!-- Recent Transactions Table -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h3 class="section-label font-bold text-gray-900 dark:text-white"><i data-lucide="history" class="w-4 h-4" aria-hidden="true"></i><span data-i18n="recentPayments">Recent Payment Records</span></h3>
+            <button onclick="switchTab('records')" class="text-xs font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+              <span data-i18n="viewAll">View All</span>
+              <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <tr>
+                  <th class="px-5 py-3" data-i18n="tblDate">Date</th>
+                  <th class="px-5 py-3" data-i18n="tblReceipt">Receipt #</th>
+                  <th class="px-5 py-3 text-right" data-i18n="tblUnits">Units</th>
+                  <th class="px-5 py-3 text-right" data-i18n="tblBilled">Billed Cost</th>
+                  <th class="px-5 py-3 text-right" data-i18n="tblPaid">Amount Paid</th>
+                  <th class="px-5 py-3" data-i18n="tblStatus">Status</th>
+                </tr>
+              </thead>
+              <tbody id="dash-recent-tbody" class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                <!-- Rows injected dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- NEW PAYMENT TAB -->
+      <section id="tab-new-payment" class="tab-content hidden max-w-4xl mx-auto space-y-6">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-6">
+          <h3 class="section-label text-base font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-3"><span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"><i data-lucide="file-plus-2" class="w-4 h-4" aria-hidden="true"></i></span><span data-i18n="formTitle">Record Electricity Payment</span></h3>
+
+          <form id="payment-form" onsubmit="handleNewPayment(event)" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="input-date" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="calendar-days" aria-hidden="true"></i><span data-i18n="lblDate">Payment Date</span></label>
+                <input type="date" id="input-date" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+              </div>
+              <div>
+                <label for="input-method" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="credit-card" aria-hidden="true"></i><span data-i18n="lblPaymentMethod">Payment Method</span></label>
+                <select id="input-method" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                  <option value="Cash">Cash</option>
+                  <option value="eSewa">eSewa</option>
+                  <option value="Khalti">Khalti</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label for="input-prev-reading" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="history" aria-hidden="true"></i><span data-i18n="lblPrevReading">Previous Reading</span></label>
+                <input type="number" id="input-prev-reading" step="any" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+              </div>
+              <div>
+                <label for="input-curr-reading" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="gauge" aria-hidden="true"></i><span data-i18n="lblCurrReading">Current Reading</span></label>
+                <input type="number" id="input-curr-reading" step="any" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+              </div>
+              <div>
+                <label for="input-rate" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="circle-dollar-sign" aria-hidden="true"></i><span data-i18n="lblRate">Rate (Rs / Unit)</span></label>
+                <input type="number" id="input-rate" step="any" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+              </div>
+            </div>
+
+            <!-- LIVE FINANCIAL RECKONING PANEL -->
+            <div class="bg-gray-50 dark:bg-gray-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
+              <h4 class="section-label text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider"><i data-lucide="chart-no-axes-combined" class="w-4 h-4" aria-hidden="true"></i><span data-i18n="liveSummaryTitle">Live Financial Summary</span></h4>
+
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="unitsConsumed">Units Consumed</span>
+                  <span id="live-units" class="font-semibold text-gray-900 dark:text-white">0</span>
+                </div>
+                <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="billCost">Current Bill</span>
+                  <span id="live-cost" class="font-semibold text-gray-900 dark:text-white">Rs. 0</span>
+                </div>
+                <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="prevAdvanceApplied">Advance Applied</span>
+                  <span id="live-advance-applied" class="font-semibold text-blue-600 dark:text-blue-400">Rs. 0</span>
+                </div>
+                <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="netPayable">Net Amount Payable</span>
+                  <span id="live-net-payable" class="font-bold text-emerald-600 dark:text-emerald-400">Rs. 0</span>
+                </div>
+              </div>
+
+              <div id="advance-explanation" class="text-xs text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-950/30 p-2.5 rounded border border-blue-200 dark:border-blue-800">
+                <!-- Helper message -->
+              </div>
+            </div>
+
+            <div id="payment-helper-container" onmouseenter="showPaymentHelper(true)" onmouseleave="hidePaymentHelper(true)">
+              <label for="input-amount-paid" class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1" data-i18n="lblAmountPaid">Amount Paid Now (Rs)</label>
+              <div class="relative">
+                <i data-lucide="banknote" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true"></i>
+                <input type="number" id="input-amount-paid" step="any" min="0" required aria-describedby="payment-helper" aria-expanded="false" class="w-full pl-10 pr-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-base font-bold text-emerald-600 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-shadow" oninput="calculateLivePaymentSummary()" onfocus="showPaymentHelper()" onblur="hidePaymentHelper(true)">
+              </div>
+              <div id="payment-helper" role="status" aria-live="polite" class="payment-helper hidden mt-2.5 flex items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+                <i data-lucide="info" class="w-4 h-4 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" aria-hidden="true"></i>
+                <span id="payment-helper-message"></span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div class="text-xs text-gray-500">
+                <span data-i18n="newBalanceStatus">New Status: </span>
+                <span id="live-status-badge" class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-800">DUE</span>
+              </div>
+              <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
+                <i data-lucide="check" class="w-4 h-4"></i>
+                <span data-i18n="btnSavePayment">Save Payment Record</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- PAYMENT RECORDS TAB -->
+      <section id="tab-records" class="tab-content hidden space-y-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div class="relative w-full sm:w-64">
+              <i data-lucide="search" class="w-4 h-4 absolute left-3 top-2.5 text-gray-400"></i>
+              <input type="text" id="records-search" placeholder="Search receipt or date..." oninput="renderRecordsTable()" class="w-full pl-9 pr-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-3 w-full sm:w-auto">
+              <span class="text-xs text-gray-500" id="records-count">Showing 0 records</span>
+              <div class="flex items-center gap-2">
+                <span id="records-selection-summary" class="hidden text-xs font-semibold text-emerald-700 dark:text-emerald-300" aria-live="polite"></span>
+                <button id="clear-payment-selection" type="button" onclick="clearPaymentSelection()" class="hidden px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg items-center gap-1.5">
+                  <i data-lucide="x" class="w-3.5 h-3.5" aria-hidden="true"></i>Clear
+                </button>
+                <button id="generate-combined-receipt" type="button" onclick="generateCombinedReceipt()" class="hidden px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold items-center gap-1.5">
+                  <i data-lucide="eye" class="w-4 h-4" aria-hidden="true"></i>Combined Receipt
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <tr>
+                  <th class="px-4 py-3 text-center">
+                    <label class="inline-flex items-center gap-1.5 normal-case cursor-pointer">
+                      <input id="select-all-payments" type="checkbox" onchange="toggleSelectAllPayments(this.checked)" aria-label="Select all visible payment records" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
+                      <span>Select all</span>
+                    </label>
+                  </th>
+                  <th class="px-4 py-3" data-i18n="tblReceipt">Receipt #</th>
+                  <th class="px-4 py-3" data-i18n="tblDate">Date</th>
+                  <th class="px-4 py-3 text-right" data-i18n="tblUnits">Units</th>
+                  <th class="px-4 py-3 text-right" data-i18n="tblBilled">Billed Cost</th>
+                  <th class="px-4 py-3 text-right" data-i18n="tblPaid">Amount Paid</th>
+                  <th class="px-4 py-3 text-right" data-i18n="tblDue">Due</th>
+                  <th class="px-4 py-3 text-right" data-i18n="tblAdvance">Advance</th>
+                  <th class="px-4 py-3" data-i18n="tblStatus">Status</th>
+                  <th class="px-4 py-3 text-center" data-i18n="tblActions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="records-tbody" class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                <!-- Dynamic Rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ANALYTICS TAB -->
+      <section id="tab-analytics" class="tab-content hidden space-y-6">
+        <!-- Analytics Top KPIs -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400 mb-3"><i data-lucide="zap" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="analyticsTotalUnits">Total Units Consumed</p>
+            <h3 id="analytics-total-units" class="text-2xl font-bold mt-2 text-gray-900 dark:text-white">0 kWh</h3>
+          </div>
+          <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400 mb-3"><i data-lucide="calendar-range" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="analyticsAvgBill">Avg Monthly Bill</p>
+            <h3 id="analytics-avg-bill" class="text-2xl font-bold mt-2 text-gray-900 dark:text-white">Rs. 0</h3>
+          </div>
+          <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 mb-3"><i data-lucide="trending-up" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="analyticsHighestBill">Highest Bill</p>
+            <h3 id="analytics-max-bill" class="text-2xl font-bold mt-2 text-emerald-600 dark:text-emerald-400">Rs. 0</h3>
+          </div>
+          <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400 mb-3"><i data-lucide="files" class="w-4 h-4" aria-hidden="true"></i></span>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="analyticsTotalRecords">Total Transactions</p>
+            <h3 id="analytics-total-records" class="text-2xl font-bold mt-2 text-gray-900 dark:text-white">0</h3>
+          </div>
+        </div>
+
+        <!-- FIXED STABLE HEIGHT CHART CONTAINERS -->
+        <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <h3 class="section-label text-sm font-bold text-gray-900 dark:text-white mb-4"><i data-lucide="activity" class="w-4 h-4" aria-hidden="true"></i><span data-i18n="chartConsumptionTitle">Units Consumption Trend</span></h3>
+          <div class="relative w-full h-[300px] max-h-[300px] overflow-hidden">
+            <canvas id="chart-consumption"></canvas>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <h3 class="section-label text-sm font-bold text-gray-900 dark:text-white mb-4"><i data-lucide="chart-no-axes-combined" class="w-4 h-4" aria-hidden="true"></i><span data-i18n="chartPaymentTrendTitle">Payment vs Billed Trend</span></h3>
+            <div class="relative w-full h-[280px] max-h-[280px] overflow-hidden">
+              <canvas id="chart-payments"></canvas>
+            </div>
+          </div>
+          <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <h3 class="section-label text-sm font-bold text-gray-900 dark:text-white mb-4"><i data-lucide="chart-pie" class="w-4 h-4" aria-hidden="true"></i><span data-i18n="chartMethodsTitle">Payment Methods Distribution</span></h3>
+            <div class="relative w-full h-[280px] max-h-[280px] flex items-center justify-center overflow-hidden">
+              <canvas id="chart-methods"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ADVANCES & DUE SNAPSHOT TAB -->
+      <section id="tab-snapshot" class="tab-content hidden space-y-6">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-6">
+          <h3 class="section-label text-base font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-3"><span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400"><i data-lucide="scale" class="w-4 h-4" aria-hidden="true"></i></span><span data-i18n="snapshotTitle">Meter & Account State Snapshot</span></h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-2">
+              <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-white/80 text-emerald-600 dark:bg-emerald-900/60 dark:text-emerald-300"><i data-lucide="wallet" class="w-4 h-4" aria-hidden="true"></i></span>
+              <p class="text-xs font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider" data-i18n="snapshotAdvanceTitle">Current Advance Credit</p>
+              <h2 id="snap-advance" class="text-3xl font-bold text-emerald-600 dark:text-emerald-400">Rs. 0</h2>
+              <p class="text-xs text-emerald-700 dark:text-emerald-400" data-i18n="snapAdvanceDesc">This amount will automatically deduct from your next electricity bill.</p>
+            </div>
+
+            <div class="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-2">
+              <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-white/80 text-amber-600 dark:bg-amber-900/60 dark:text-amber-300"><i data-lucide="triangle-alert" class="w-4 h-4" aria-hidden="true"></i></span>
+              <p class="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider" data-i18n="snapshotDueTitle">Current Pending Due</p>
+              <h2 id="snap-due" class="text-3xl font-bold text-amber-600 dark:text-amber-400">Rs. 0</h2>
+              <p class="text-xs text-amber-700 dark:text-amber-400" data-i18n="snapDueDesc">This amount will automatically add to your next electricity bill.</p>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-200 dark:border-gray-700 pt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+            <div>
+              <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="snapLastReading">Last Meter Reading</span>
+              <span id="snap-last-reading" class="font-bold text-gray-900 dark:text-white">0</span>
+            </div>
+            <div>
+              <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="snapConfigRate">Configured Default Rate</span>
+              <span id="snap-rate" class="font-bold text-gray-900 dark:text-white">Rs. 0 / Unit</span>
+            </div>
+            <div>
+              <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="snapLastUpdated">Last Transaction Date</span>
+              <span id="snap-last-date" class="font-bold text-gray-900 dark:text-white">N/A</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BACKUP / RESTORE TAB -->
+      <section id="tab-backup" class="tab-content hidden max-w-3xl mx-auto space-y-6">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-6">
+          <h3 class="section-label text-base font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-3"><span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400"><i data-lucide="database" class="w-4 h-4" aria-hidden="true"></i></span><span data-i18n="backupTitle">Excel Backup & System Restore</span></h3>
+
+          <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+            <div class="flex items-start gap-3">
+              <span class="inline-flex w-10 h-10 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-sm dark:bg-emerald-900/60 dark:text-emerald-300"><i data-lucide="file-spreadsheet" class="w-5 h-5" aria-hidden="true"></i></span>
+              <div class="min-w-0 flex-1">
+                <h4 class="font-semibold text-sm text-emerald-900 dark:text-emerald-100">Permanent Excel Backup</h4>
+                <p class="mt-1 text-xs leading-relaxed text-emerald-800 dark:text-emerald-200">Choose a folder once. ElectroPay will keep one <strong>Electricity_Payment_Backup.xlsx</strong> workbook there, update it without duplicating records, and preserve records removed from this app as archived.</p>
+                <p id="excel-backup-location" class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">Backup folder is not connected.</p>
+                <p id="excel-backup-status" role="status" aria-live="polite" class="mt-1 text-xs text-emerald-800 dark:text-emerald-200">No Excel backup has been synchronized yet.</p>
+              </div>
+            </div>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <button type="button" onclick="selectExcelBackupFolder()" class="rounded-lg bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-800 flex items-center gap-2">
+                <i data-lucide="folder-open" class="w-4 h-4" aria-hidden="true"></i><span id="excel-folder-button-label">Choose Backup Folder</span>
+              </button>
+              <button type="button" onclick="syncExcelBackup()" class="rounded-lg border border-emerald-300 bg-white px-3.5 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-800 dark:bg-gray-800 dark:text-emerald-200 dark:hover:bg-emerald-950/50 flex items-center gap-2">
+                <i data-lucide="refresh-cw" class="w-4 h-4" aria-hidden="true"></i><span>Backup Now</span>
+              </button>
+              <label class="cursor-pointer rounded-lg border border-blue-300 bg-white px-3.5 py-2 text-xs font-semibold text-blue-800 transition hover:bg-blue-50 dark:border-blue-800 dark:bg-gray-800 dark:text-blue-200 dark:hover:bg-blue-950/50 flex items-center gap-2">
+                <i data-lucide="rotate-ccw" class="w-4 h-4" aria-hidden="true"></i><span>Restore from Excel</span>
+                <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden" onchange="restoreFromExcel(event)">
+              </label>
+            </div>
+            <label class="mt-4 inline-flex items-center gap-2 text-xs font-medium text-emerald-900 dark:text-emerald-100">
+              <input id="excel-auto-backup" type="checkbox" checked onchange="setExcelAutoBackup(this.checked)" class="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500">
+              Automatically update the Excel backup after each saved payment
+            </label>
+            <p class="mt-2 text-[11px] leading-relaxed text-emerald-700 dark:text-emerald-300">Requires a browser that supports folder access (such as current Chrome or Edge). If this page is opened as a local file and folder access is unavailable, run it from localhost. The browser will ask permission to access the selected folder.</p>
+          </div>
+
+          <div class="space-y-4">
+            <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+              <div class="flex items-start gap-3">
+                <span class="inline-flex w-9 h-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"><i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i></span>
+                <div>
+                <h4 class="font-semibold text-sm text-gray-900 dark:text-white" data-i18n="backupExportTitle">Export Application Data</h4>
+                <p class="text-xs text-gray-500 dark:text-gray-400" data-i18n="backupExportDesc">Download a local JSON backup of all ledger transactions and settings.</p>
+                </div>
+              </div>
+              <button onclick="exportDataJSON()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-2">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                <span data-i18n="btnExportJSON">Export Backup</span>
+              </button>
+            </div>
+
+            <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+              <div class="flex items-start gap-3">
+                <span class="inline-flex w-9 h-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400"><i data-lucide="upload" class="w-4 h-4" aria-hidden="true"></i></span>
+                <div>
+                <h4 class="font-semibold text-sm text-gray-900 dark:text-white" data-i18n="backupImportTitle">Restore Application Data</h4>
+                <p class="text-xs text-gray-500 dark:text-gray-400" data-i18n="backupImportDesc">Restore ledger records from a previously exported backup file.</p>
+                </div>
+              </div>
+              <label class="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-700 dark:hover:bg-gray-600 text-white rounded-lg text-xs font-medium cursor-pointer transition-colors flex items-center gap-2">
+                <i data-lucide="upload" class="w-4 h-4"></i>
+                <span data-i18n="btnImportJSON">Import File</span>
+                <input type="file" accept=".json" class="hidden" onchange="importDataJSON(event)">
+              </label>
+            </div>
+
+            <div class="p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 flex items-center justify-between gap-4">
+              <div class="flex items-start gap-3">
+                <span class="inline-flex w-9 h-9 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300"><i data-lucide="triangle-alert" class="w-4 h-4" aria-hidden="true"></i></span>
+                <div>
+                <h4 class="font-semibold text-sm text-red-700 dark:text-red-400" data-i18n="resetTitle">Reset Application State</h4>
+                <p class="text-xs text-red-600 dark:text-red-300" data-i18n="resetDesc">Wipe all stored records and reset configured values to system defaults.</p>
+                </div>
+              </div>
+              <button onclick="confirmResetSystem()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-2">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                <span data-i18n="btnResetSystem">Reset Data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS TAB -->
+      <section id="tab-settings" class="tab-content hidden max-w-2xl mx-auto space-y-6">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-6">
+          <h3 class="section-label text-base font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-3"><span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-400"><i data-lucide="settings-2" class="w-4 h-4" aria-hidden="true"></i></span><span data-i18n="settingsTitle">System Configuration</span></h3>
+
+          <form onsubmit="saveSettings(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1" data-i18n="settingRate">Default Rate per Unit (Rs)</label>
+              <input type="number" id="setting-rate" step="any" min="0" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1" data-i18n="settingPrefix">Receipt Number Prefix</label>
+              <input type="text" id="setting-prefix" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            </div>
+
+            <div class="flex justify-end pt-2">
+              <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                <i data-lucide="save" class="w-4 h-4"></i>
+                <span data-i18n="btnSaveSettings">Save Configuration</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- RECEIPT VIEW (MODAL / SCREEN) -->
+      <section id="tab-receipt" class="tab-content hidden max-w-3xl mx-auto space-y-4">
+        <div class="no-print flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <button onclick="switchTab('records')" class="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-1.5 transition-colors">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i>
+            <span data-i18n="btnBackToRecords">Back to Records</span>
+          </button>
+          <button onclick="printReceipt()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-2 transition-colors">
+            <i data-lucide="printer" class="w-4 h-4"></i>
+            <span id="receipt-print-label" data-i18n="btnPrintReceipt">Print Receipt</span>
+          </button>
+        </div>
+
+        <!-- COMPACT 2-COLUMN PRINTABLE RECEIPT CARD -->
+        <div id="print-wrapper">
+          <div id="combined-receipt-card" class="hidden bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-lg">
+            <div class="combined-receipt-hero receipt-hero text-white px-6 py-6 sm:px-8 sm:py-7 flex items-center justify-between gap-4">
+              <div class="flex items-center gap-4 min-w-0">
+                <div class="shrink-0 w-12 h-12 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center">
+                  <i data-lucide="files" class="w-6 h-6" aria-hidden="true"></i>
+                </div>
+                <div class="min-w-0">
+                  <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-100 mb-1">ElectroPay</p>
+                  <h2 class="text-lg sm:text-xl font-bold tracking-wide">Combined Payment Receipt</h2>
+                  <p class="text-xs text-emerald-50/90 mt-1" id="combined-receipt-subtitle">Grouped payment records</p>
+                </div>
+              </div>
+              <span class="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white text-emerald-800">
+                <i data-lucide="layers-3" class="w-3.5 h-3.5" aria-hidden="true"></i>Combined
+              </span>
+            </div>
+            <div class="combined-receipt-content p-5 sm:p-8 space-y-5">
+              <div class="combined-receipt-summary grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
+                <div><span class="font-semibold text-slate-500">Customer / Account</span><p class="mt-1 font-bold text-slate-900">Current electricity account</p></div>
+                <div><span class="font-semibold text-slate-500">Account scope</span><p class="mt-1 font-bold text-slate-900">Single ledger in this application</p></div>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="combined-receipt-table text-xs sm:text-sm">
+                  <thead>
+                    <tr>
+                      <th>Payment Date</th>
+                      <th>Original Receipt #</th>
+                      <th>Payment Type</th>
+                      <th class="text-right">Amount Paid</th>
+                    </tr>
+                  </thead>
+                  <tbody id="combined-receipt-rows"></tbody>
+                </table>
+              </div>
+              <div class="combined-receipt-total flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div>
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Total payments</p>
+                  <p id="combined-receipt-count" class="mt-1 text-sm font-bold text-emerald-900">0 payments</p>
+                </div>
+                <div class="sm:text-right">
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Total amount paid</p>
+                  <p id="combined-receipt-total" class="mt-1 text-xl font-extrabold text-emerald-900">Rs. 0</p>
+                </div>
+              </div>
+              <div class="combined-receipt-summary grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs">
+                <div><span class="font-semibold text-slate-500">Latest selected payment</span><p id="combined-receipt-latest-date" class="mt-1 font-bold text-slate-900">-</p></div>
+                <div><span class="font-semibold text-slate-500">Balance after that payment</span><p id="combined-receipt-balance" class="mt-1 font-bold text-slate-900">-</p></div>
+                <div><span class="font-semibold text-slate-500">Status</span><p id="combined-receipt-status" class="mt-1 font-bold text-slate-900">-</p></div>
+              </div>
+              <p class="border-t border-dashed border-slate-200 pt-4 text-center text-xs text-slate-500">This combined receipt groups the listed original payments. Original payment records and receipt numbers are unchanged.</p>
+            </div>
+          </div>
+          <div id="receipt-card" class="bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-lg">
+            <!-- Receipt Header -->
+            <div class="receipt-hero text-white px-6 py-6 sm:px-8 sm:py-7 flex items-center justify-between gap-4">
+              <div class="flex items-center gap-4 min-w-0">
+                <div class="shrink-0 w-14 h-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center">
+                  <i data-lucide="zap" class="w-7 h-7" aria-hidden="true"></i>
+                </div>
+                <div class="min-w-0">
+                  <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-100 mb-1">ElectroPay</p>
+                  <h2 class="text-lg sm:text-xl font-bold tracking-wide" data-i18n="receiptTitle">Electricity Payment Receipt</h2>
+                  <p class="text-xs text-emerald-50/90 mt-1" id="rcpt-subtitle">Official Payment Voucher</p>
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <span id="rcpt-status-badge" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white text-emerald-800">
+                  <i data-lucide="circle-check" class="w-3.5 h-3.5" aria-hidden="true"></i>PAID
+                </span>
+                <p class="text-[10px] uppercase tracking-widest text-emerald-100 mt-3">Receipt No.</p>
+                <p class="text-sm font-mono font-bold mt-0.5" id="rcpt-no">EPR-000001</p>
+              </div>
+            </div>
+
+            <div class="p-5 sm:p-8 space-y-6">
+              <div class="receipt-paid-summary rounded-2xl bg-emerald-50 border border-emerald-100 p-4 sm:px-6 sm:py-5 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-11 h-11 rounded-xl bg-white text-emerald-600 flex items-center justify-center shadow-sm">
+                    <i data-lucide="wallet" class="w-5 h-5" aria-hidden="true"></i>
+                  </div>
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-700" data-i18n="lblAmountPaid">Amount Paid</p>
+                    <p class="text-xs text-emerald-700/70 mt-0.5" data-i18n="lblPaymentMethod">Payment Method</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p id="rcpt-amount-paid" class="text-xl sm:text-2xl font-extrabold tracking-tight text-emerald-800">Rs. 0</p>
+                  <p id="rcpt-method" class="text-xs font-semibold text-emerald-700 mt-0.5">Cash</p>
+                </div>
+              </div>
+
+              <!-- Meter and payment details -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 text-sm">
+                <div class="receipt-section bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200">
+                  <h4 class="flex items-center gap-2.5 text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-3 mb-3">
+                    <span class="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center"><i data-lucide="gauge" class="w-4 h-4" aria-hidden="true"></i></span>
+                    <span data-i18n="rcptMeterSection">Meter & Consumption</span>
+                  </h4>
+                  <div class="space-y-3 text-xs">
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblDate">Payment Date</span><span id="rcpt-date" class="font-semibold text-slate-900 text-right">-</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblPrevReading">Previous Reading</span><span id="rcpt-prev-reading" class="font-semibold text-slate-900 text-right">0</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblCurrReading">Current Reading</span><span id="rcpt-curr-reading" class="font-semibold text-slate-900 text-right">0</span></div>
+                    <div class="flex justify-between gap-4 rounded-lg bg-white px-3 py-2 border border-slate-100"><span class="font-semibold text-slate-600" data-i18n="unitsConsumed">Units Consumed</span><span id="rcpt-units" class="font-bold text-slate-900 text-right">0</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblRate">Rate per Unit</span><span id="rcpt-rate" class="font-semibold text-slate-900 text-right">Rs. 0</span></div>
+                    <div class="flex justify-between gap-4 border-t border-slate-200 pt-3"><span class="font-bold text-slate-700" data-i18n="billCost">Current Bill</span><span id="rcpt-cost" class="font-bold text-emerald-700 text-right">Rs. 0</span></div>
+                  </div>
+                </div>
+
+                <div class="receipt-section bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200">
+                  <h4 class="flex items-center gap-2.5 text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-3 mb-3">
+                    <span class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center"><i data-lucide="receipt-text" class="w-4 h-4" aria-hidden="true"></i></span>
+                    <span data-i18n="rcptFinancialSection">Payment Breakdown</span>
+                  </h4>
+                  <div class="space-y-3 text-xs">
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="prevAdvanceApplied">Previous Advance</span><span id="rcpt-prev-advance" class="font-semibold text-slate-900 text-right">Rs. 0</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="advanceApplied">Advance Applied</span><span id="rcpt-advance-applied" class="font-semibold text-blue-600 text-right">Rs. 0</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="prevDue">Previous Outstanding Due</span><span id="rcpt-prev-due" class="font-semibold text-amber-600 text-right">Rs. 0</span></div>
+                    <div class="flex justify-between gap-4 border-t border-slate-200 pt-3"><span class="text-slate-500" data-i18n="newAdvance">Remaining Advance</span><span id="rcpt-new-advance" class="font-semibold text-blue-600 text-right">Rs. 0</span></div>
+                    <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="newDue">Remaining Due</span><span id="rcpt-new-due" class="font-semibold text-amber-600 text-right">Rs. 0</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="border-t border-dashed border-slate-200 pt-5 flex items-start justify-center gap-2 text-center text-xs text-slate-500">
+                <i data-lucide="heart-handshake" class="w-4 h-4 shrink-0 text-emerald-600" aria-hidden="true"></i>
+                <p data-i18n="rcptFooterMsg">Thank you for your prompt payment. Keep this receipt for future reference.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- CUSTOM MODAL CONTAINER -->
+  <div id="custom-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl max-w-md w-full p-6 space-y-4">
+      <h3 id="modal-title" class="text-base font-bold text-gray-900 dark:text-white">Confirm Action</h3>
+      <p id="modal-msg" class="text-xs text-gray-600 dark:text-gray-300">Are you sure you want to perform this operation?</p>
+      <div class="flex justify-end gap-3 pt-2">
+        <button id="modal-btn-cancel" onclick="closeModal()" class="px-4 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+        <button id="modal-btn-confirm" class="px-4 py-2 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="excel-conflict-modal" class="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800 shadow-xl max-w-2xl w-full p-5 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-start gap-3">
+        <span class="inline-flex w-10 h-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"><i data-lucide="triangle-alert" class="w-5 h-5" aria-hidden="true"></i></span>
+        <div>
+          <h3 class="text-base font-bold text-gray-900 dark:text-white">Excel Backup Conflicts</h3>
+          <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">These record IDs have different values in the app and workbook. Choose which version to keep for each record. No workbook changes will be made until you confirm.</p>
+        </div>
+      </div>
+      <div id="excel-conflict-list" class="space-y-3"></div>
+      <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+        <button type="button" onclick="resolveExcelConflicts(null)" class="px-4 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel Sync</button>
+        <button type="button" onclick="confirmExcelConflicts()" class="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white">Apply Choices & Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- APPLICATION JAVASCRIPT ARCHITECTURE -->
+  <script src="./js/app.js"></script>
+</body>
+</html>
