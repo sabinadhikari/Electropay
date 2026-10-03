@@ -257,6 +257,7 @@
     let activeReceiptType = 'single';
     let editingRecordId = null;
     let activeCustomerId = '';
+    let paymentSaveInProgress = false;
     let viewedCustomerId = '';
 
     function makeId(prefix) {
@@ -463,8 +464,10 @@
     function saveState() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        return true;
       } catch (err) {
         console.error("Failed saving state:", err);
+        return false;
       }
     }
 
@@ -544,8 +547,9 @@
         };
       });
 
-      saveState();
+      const saved = saveState();
       refreshActiveViews();
+      return saved;
     }
 
     function getLatestLedgerState(customerId = activeCustomerId) {
@@ -955,10 +959,10 @@
       setupNewPaymentForm();
     }
 
-    function setupNewPaymentForm(recordToEdit = null) {
+    function setupNewPaymentForm(recordToEdit = null, clearCustomer = false) {
       const record = recordToEdit || (editingRecordId ? state.records.find(r => r.id === editingRecordId) : null);
       const customerSelect = document.getElementById('input-customer');
-      const preferredCustomerId = record?.customerId || activeCustomerId || customerSelect.value || state.customers[0]?.id || '';
+      const preferredCustomerId = record?.customerId || (clearCustomer ? '' : activeCustomerId || customerSelect.value || state.customers[0]?.id || '');
       customerSelect.replaceChildren();
       const prompt = document.createElement('option');
       prompt.value = '';
@@ -975,10 +979,12 @@
       customerSelect.value = preferredCustomerId;
       customerSelect.disabled = Boolean(record);
       activeCustomerId = customerSelect.value || '';
-      const latest = getLatestLedgerState(activeCustomerId);
+      const latest = activeCustomerId
+        ? getLatestLedgerState(activeCustomerId)
+        : { lastReading: null, hasPreviousReading: false, currentAdvance: 0, currentDue: 0 };
       const firstReading = record
         ? record.previousReading === null || record.previousReading === undefined || record.previousReading === ''
-        : !latest.hasPreviousReading;
+        : !activeCustomerId || !latest.hasPreviousReading;
 
       if (record) {
         setPaymentFormMode(record.id);
@@ -998,12 +1004,13 @@
         : '';
       previousInput.readOnly = firstReading;
       previousInput.required = !firstReading;
-      document.getElementById('opening-bill-container').classList.toggle('hidden', !firstReading);
-      document.getElementById('first-reading-notice').classList.toggle('hidden', !firstReading);
+      document.getElementById('opening-bill-container').classList.toggle('hidden', !firstReading || !activeCustomerId);
+      document.getElementById('first-reading-notice').classList.toggle('hidden', !firstReading || !activeCustomerId);
       document.getElementById('input-curr-reading').value = record ? (record.currentReading ?? '') : (latest.hasPreviousReading ? latest.lastReading : '');
       document.getElementById('input-rate').value = record ? record.rate : state.settings.rate;
       document.getElementById('input-opening-bill').value = record ? (record.openingBillAmount ?? 0) : 0;
-      document.getElementById('input-amount-paid').value = record ? record.amountPaid : 0;
+      document.getElementById('input-method').value = record ? record.paymentMethod || 'Cash' : 'Cash';
+      document.getElementById('input-amount-paid').value = record ? record.amountPaid : '';
       calculateLivePaymentSummary();
     }
 
@@ -1044,7 +1051,10 @@
     function handleReadingTypeChange() {
       const firstReading = document.getElementById('reading-type-first').checked;
       const previousInput = document.getElementById('input-prev-reading');
-      const latest = getLatestLedgerState();
+      const customerId = document.getElementById('input-customer').value || activeCustomerId;
+      const latest = customerId
+        ? getLatestLedgerState(customerId)
+        : { lastReading: null, hasPreviousReading: false };
 
       if (firstReading) {
         previousInput.value = '';
@@ -1065,7 +1075,10 @@
     }
 
     function calculateLivePaymentSummary() {
-      const latest = getLatestLedgerState(document.getElementById('input-customer').value || activeCustomerId);
+      const customerId = document.getElementById('input-customer').value || activeCustomerId;
+      const latest = customerId
+        ? getLatestLedgerState(customerId)
+        : { currentAdvance: 0, currentDue: 0 };
       const isFirstReading = document.getElementById('reading-type-first').checked;
       const previousInputValue = document.getElementById('input-prev-reading').value;
       const prevReading = isFirstReading || previousInputValue === '' ? null : Number(previousInputValue);
@@ -1179,90 +1192,133 @@
       amountInput.setAttribute('aria-expanded', 'false');
     }
 
-    function handleNewPayment(e) {
+    async function handleNewPayment(e) {
       e.preventDefault();
-      const customerId = document.getElementById('input-customer').value;
-      const customer = getCustomer(customerId);
-      if (!customer) {
-        showToast('Select a customer before recording a payment.', 'error');
-        return;
-      }
-      if (!customer.customerName.trim()) {
-        showToast('Add this customer’s name before recording a payment. Use the Customers page to update their information.', 'error');
-        return;
-      }
-      const latest = getLatestLedgerState(customerId);
-      const isFirstReading = document.getElementById('reading-type-first').checked;
-      const previousInputValue = document.getElementById('input-prev-reading').value;
-      const prevReading = isFirstReading
-        ? null
-        : (previousInputValue === '' ? null : Number(previousInputValue));
-      const currReading = parseFloat(document.getElementById('input-curr-reading').value);
-      const paymentDate = convertNepaliDateToISO(document.getElementById('input-date').value);
+      if (paymentSaveInProgress) return;
 
-      if (!Number.isFinite(currReading) || currReading < 0) {
-        showToast("Enter a valid non-negative current meter reading.", "error");
-        return;
-      }
+      paymentSaveInProgress = true;
+      const submitButton = document.getElementById('payment-submit-button');
+      const submitLabel = document.getElementById('payment-submit-label');
+      const paymentControls = Array.from(document.getElementById('payment-form').elements);
+      const previouslyDisabled = paymentControls.map(control => control.disabled);
+      paymentControls.forEach(control => { control.disabled = true; });
+      submitLabel.textContent = 'Saving...';
 
-      if (!isFirstReading && (prevReading === null || !Number.isFinite(prevReading) || prevReading < 0)) {
-        showToast(translations[state.uiPreferences.lang].missingPreviousReadingError, "error");
-        return;
-      }
-
-      if (!isFirstReading && currReading < prevReading) {
-        showToast(translations[state.uiPreferences.lang].readingLowerError, "error");
-        return;
-      }
-
-      if (!paymentDate) {
-        showToast("Enter a valid Nepali BS date in YYYY-MM-DD format.", "error");
-        return;
-      }
-
-      const openingBillValue = document.getElementById('input-opening-bill').value;
-      const openingBillAmount = isFirstReading && openingBillValue !== '' ? Number(openingBillValue) : 0;
-      if (!Number.isFinite(openingBillAmount) || openingBillAmount < 0) {
-        showToast("Enter a valid non-negative opening bill amount.", "error");
-        return;
-      }
-
-      const recordData = {
-        customerId,
-        date: paymentDate,
-        readingType: isFirstReading ? 'FIRST' : 'NORMAL',
-        paymentMethod: document.getElementById('input-method').value,
-        previousReading: prevReading,
-        currentReading: currReading,
-        openingBillAmount,
-        rate: parseFloat(document.getElementById('input-rate').value),
-        amountPaid: parseFloat(document.getElementById('input-amount-paid').value)
-      };
-
-      if (editingRecordId) {
-        const recordIndex = state.records.findIndex(record => record.id === editingRecordId);
-        if (recordIndex >= 0) {
-          state.records[recordIndex] = {
-            ...state.records[recordIndex],
-            ...recordData,
-            updatedAt: new Date().toISOString()
-          };
-          showToast("Payment record updated successfully!");
+      try {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const customerId = document.getElementById('input-customer').value;
+        const customer = getCustomer(customerId);
+        if (!customer) {
+          showToast('Select a customer before recording a payment.', 'error');
+          return;
         }
-      } else {
-        state.records.push({
-          id: `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
-          createdAt: new Date().toISOString(),
-          ...recordData
-        });
-        showToast("Payment record saved successfully!");
-      }
+        if (!customer.customerName.trim()) {
+          showToast('Add this customer’s name before recording a payment. Use the Customers page to update their information.', 'error');
+          return;
+        }
+        const isFirstReading = document.getElementById('reading-type-first').checked;
+        const previousInputValue = document.getElementById('input-prev-reading').value;
+        const prevReading = isFirstReading
+          ? null
+          : (previousInputValue === '' ? null : Number(previousInputValue));
+        const currReading = parseFloat(document.getElementById('input-curr-reading').value);
+        const paymentDate = convertNepaliDateToISO(document.getElementById('input-date').value);
 
-      setPaymentFormMode();
-      rebuildLedger();
-      switchTab('records');
-      if (state.settings.autoExcelBackup !== false) {
-        void syncExcelBackup(true);
+        if (!Number.isFinite(currReading) || currReading < 0) {
+          showToast("Enter a valid non-negative current meter reading.", "error");
+          return;
+        }
+
+        if (!isFirstReading && (prevReading === null || !Number.isFinite(prevReading) || prevReading < 0)) {
+          showToast(translations[state.uiPreferences.lang].missingPreviousReadingError, "error");
+          return;
+        }
+
+        if (!isFirstReading && currReading < prevReading) {
+          showToast(translations[state.uiPreferences.lang].readingLowerError, "error");
+          return;
+        }
+
+        if (!paymentDate) {
+          showToast("Enter a valid Nepali BS date in YYYY-MM-DD format.", "error");
+          return;
+        }
+
+        const openingBillValue = document.getElementById('input-opening-bill').value;
+        const openingBillAmount = isFirstReading && openingBillValue !== '' ? Number(openingBillValue) : 0;
+        if (!Number.isFinite(openingBillAmount) || openingBillAmount < 0) {
+          showToast("Enter a valid non-negative opening bill amount.", "error");
+          return;
+        }
+
+        const recordData = {
+          customerId,
+          date: paymentDate,
+          readingType: isFirstReading ? 'FIRST' : 'NORMAL',
+          paymentMethod: document.getElementById('input-method').value,
+          previousReading: prevReading,
+          currentReading: currReading,
+          openingBillAmount,
+          rate: parseFloat(document.getElementById('input-rate').value),
+          amountPaid: parseFloat(document.getElementById('input-amount-paid').value)
+        };
+        const recordsBeforeSave = state.records.map(record => ({ ...record }));
+        const wasEditing = Boolean(editingRecordId);
+
+        if (wasEditing) {
+          const recordIndex = state.records.findIndex(record => record.id === editingRecordId);
+          if (recordIndex >= 0) {
+            state.records[recordIndex] = {
+              ...state.records[recordIndex],
+              ...recordData,
+              updatedAt: new Date().toISOString()
+            };
+          }
+        } else {
+          state.records.push({
+            id: `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
+            createdAt: new Date().toISOString(),
+            ...recordData
+          });
+        }
+
+        let saved = false;
+        try {
+          saved = rebuildLedger();
+        } catch (error) {
+          console.error('Failed rebuilding the payment ledger:', error);
+        }
+        if (!saved) {
+          state.records = recordsBeforeSave;
+          try {
+            rebuildLedger();
+          } catch (error) {
+            console.error('Failed restoring the payment ledger after an unsuccessful save:', error);
+          }
+          showToast('Payment could not be saved. Your entries are still here; please try again.', 'error');
+          return;
+        }
+
+        if (wasEditing) {
+          showToast("Payment record updated successfully!");
+          setPaymentFormMode();
+          switchTab('records');
+        } else {
+          showToast("Payment record saved successfully!");
+          activeCustomerId = '';
+          document.getElementById('payment-form').reset();
+          setPaymentFormMode();
+          setupNewPaymentForm(null, true);
+        }
+        if (state.settings.autoExcelBackup !== false) {
+          void syncExcelBackup(true);
+        }
+      } finally {
+        paymentSaveInProgress = false;
+        paymentControls.forEach((control, index) => {
+          control.disabled = previouslyDisabled[index];
+        });
+        submitLabel.textContent = translations[state.uiPreferences.lang].btnSavePayment;
       }
     }
 
