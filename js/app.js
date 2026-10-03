@@ -10,6 +10,7 @@
         navNewPayment: "New Payment",
         navCustomers: "Customers",
         navPaymentRecords: "Payment Records",
+        navDeletedRecords: "Deleted Records",
         navAnalytics: "Analytics",
         navFinancial: "FINANCIAL",
         navAdvancesDue: "Advances & Due",
@@ -122,6 +123,7 @@
         navNewPayment: "नयाँ भुक्तानी",
         navCustomers: "ग्राहकहरू",
         navPaymentRecords: "भुक्तानी रेकर्डहरू",
+        navDeletedRecords: "मेटाइएका रेकर्डहरू",
         navAnalytics: "विश्लेषण",
         navFinancial: "वित्तीय",
         navAdvancesDue: "पेश्की र बाँकी",
@@ -247,13 +249,15 @@
       },
       customers: [],
       records: [],
-      deletedRecordIds: []
+      deletedRecordIds: [],
+      trashAudit: []
     };
 
     let paymentHelperHovered = false;
     let excelSyncInProgress = false;
     let pendingExcelConflicts = null;
     const selectedPaymentIds = new Set();
+    const selectedTrashIds = new Set();
     let activeReceiptType = 'single';
     let editingRecordId = null;
     let activeCustomerId = '';
@@ -261,6 +265,8 @@
     let viewedCustomerId = '';
     let recordsCurrentPage = 1;
     let recordsSearchDebounceTimer = null;
+    let trashConfirmationAction = null;
+    let trashConfirmationInProgress = false;
     const RECORDS_PAGE_SIZE = 25;
 
     function makeId(prefix) {
@@ -270,8 +276,10 @@
     function ensureCustomerData() {
       if (!Array.isArray(state.customers)) state.customers = [];
       if (!Array.isArray(state.records)) state.records = [];
+      if (!Array.isArray(state.trashAudit)) state.trashAudit = [];
       state.records.forEach(record => {
         if (record.customerId) record.customerId = String(record.customerId);
+        record.isDeleted = record.isDeleted === true;
       });
       state.customers = state.customers
         .filter(customer => customer && typeof customer === 'object')
@@ -280,7 +288,8 @@
           id: String(customer.id || makeId('CUSTOMER')),
           customerName: String(customer.customerName ?? ''),
           contactNumber: String(customer.contactNumber ?? ''),
-          location: String(customer.location ?? '')
+          location: String(customer.location ?? ''),
+          isDeleted: customer.isDeleted === true
         }));
 
       const unlinkedRecords = state.records.filter(record => !record.customerId);
@@ -309,8 +318,20 @@
         }
       });
       if (!activeCustomerId || !state.customers.some(customer => customer.id === activeCustomerId)) {
-        activeCustomerId = state.customers[0]?.id || '';
+        activeCustomerId = state.customers.find(customer => !customer.isDeleted)?.id || '';
       }
+    }
+
+    function isDeletedRecord(record) {
+      return record?.isDeleted === true;
+    }
+
+    function getActiveCustomers() {
+      return state.customers.filter(customer => !isDeletedRecord(customer));
+    }
+
+    function getActivePaymentRecords() {
+      return state.records.filter(record => !isDeletedRecord(record));
     }
 
     function getCustomer(customerId) {
@@ -432,6 +453,7 @@
     window.addEventListener('DOMContentLoaded', () => {
       loadStateFromStorage();
       ensureCustomerData();
+      cleanupExpiredTrash();
       applyThemeUI();
       applyLanguageUI();
       rebuildLedger();
@@ -485,6 +507,7 @@
       const balances = new Map();
 
       state.records = state.records.map((rec, idx) => {
+        if (isDeletedRecord(rec)) return rec;
         const customerId = rec.customerId || state.customers[0]?.id || '';
         const balance = balances.get(customerId) || { advance: 0, due: 0 };
         const hasPreviousReading = rec.previousReading !== null &&
@@ -557,8 +580,8 @@
 
     function getLatestLedgerState(customerId = activeCustomerId) {
       const customerRecords = customerId
-        ? state.records.filter(record => record.customerId === customerId)
-        : state.records;
+        ? state.records.filter(record => record.customerId === customerId && !isDeletedRecord(record))
+        : getActivePaymentRecords();
       if (customerRecords.length === 0) {
         return {
           lastReading: null,
@@ -607,6 +630,7 @@
         'new-payment': [translations[lang].navNewPayment, "Calculate and log electricity bill"],
         'customers': [translations[lang].navCustomers, translations[lang].customerDirectoryDesc],
         'records': [translations[lang].navPaymentRecords, "Audit and manage past transactions"],
+        'trash': [translations[lang].navDeletedRecords, 'Review, restore, or permanently remove deleted records'],
         'analytics': [translations[lang].navAnalytics, "Visual analysis of consumption and payments"],
         'snapshot': [translations[lang].navAdvancesDue, "Current advance credit and pending balances"],
         'backup': [translations[lang].navBackupRestore, "Export JSON or reset application state"],
@@ -618,6 +642,7 @@
         'new-payment': 'file-plus-2',
         'customers': 'users',
         'records': 'receipt-text',
+        'trash': 'trash',
         'analytics': 'chart-no-axes-combined',
         'snapshot': 'scale',
         'backup': 'database',
@@ -638,6 +663,7 @@
       if (tabId === 'new-payment') setupNewPaymentForm();
       if (tabId === 'customers') renderCustomers();
       if (tabId === 'records') renderRecordsTable();
+      if (tabId === 'trash') renderDeletedRecords();
       if (tabId === 'analytics') renderAnalytics();
       if (tabId === 'snapshot') renderSnapshotView();
       if (tabId === 'settings') loadSettingsForm();
@@ -721,9 +747,10 @@
        7. DASHBOARD VIEW
        ========================================================================== */
     function renderDashboard() {
-      const totalBilled = state.records.reduce((acc, r) => acc + r.billCost, 0);
-      const totalPaid = state.records.reduce((acc, r) => acc + r.amountPaid, 0);
-      const balances = state.customers.reduce((totals, customer) => {
+      const records = getActivePaymentRecords();
+      const totalBilled = records.reduce((acc, r) => acc + r.billCost, 0);
+      const totalPaid = records.reduce((acc, r) => acc + r.amountPaid, 0);
+      const balances = getActiveCustomers().reduce((totals, customer) => {
         const latest = getLatestLedgerState(customer.id);
         totals.due += latest.currentDue;
         totals.advance += latest.currentAdvance;
@@ -738,7 +765,7 @@
       const tbody = document.getElementById('dash-recent-tbody');
       tbody.innerHTML = '';
 
-      const recent = [...state.records].reverse().slice(0, 5);
+      const recent = [...records].reverse().slice(0, 5);
       if (recent.length === 0) {
         tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-6 text-center text-xs text-gray-400">No payment records found.</td></tr>`;
         return;
@@ -764,7 +791,7 @@
       const tbody = document.getElementById('customers-tbody');
       if (!tbody) return;
       const query = (document.getElementById('customers-search')?.value || '').trim().toLocaleLowerCase();
-      const filtered = state.customers.filter(customer =>
+      const filtered = getActiveCustomers().filter(customer =>
         `${customer.customerName} ${customer.contactNumber} ${customer.location}`.toLocaleLowerCase().includes(query)
       );
       tbody.replaceChildren();
@@ -830,7 +857,7 @@
       };
       if (id) {
         const customer = getCustomer(id);
-        if (!customer) {
+        if (!customer || isDeletedRecord(customer)) {
           showToast('Customer could not be found. Refresh the customer list and try again.', 'error');
           return;
         }
@@ -873,10 +900,10 @@
 
     function viewCustomer(id) {
       const customer = getCustomer(id);
-      if (!customer) return;
+      if (!customer || isDeletedRecord(customer)) return;
       viewedCustomerId = id;
       const details = document.getElementById('customer-details');
-      const records = state.records.filter(record => record.customerId === id).slice().reverse();
+      const records = getActivePaymentRecords().filter(record => record.customerId === id).slice().reverse();
       const latest = getLatestLedgerState(id);
       const optionalFields = [
         customer.contactNumber.trim() ? `<div><span class="block text-xs text-gray-500 dark:text-gray-400">Contact Number</span><span class="font-medium">${escapeHtml(customer.contactNumber)}</span></div>` : '',
@@ -921,22 +948,27 @@
     }
 
     function deleteCustomer(id) {
-      const linkedRecords = state.records.filter(record => record.customerId === id).length;
-      if (linkedRecords) {
-        showToast('This customer has payment history and cannot be deleted. Delete the payment records first if removal is necessary.', 'error');
-        return;
-      }
-      showModal('Delete Customer', 'Delete this customer? This cannot be undone.', () => {
-        state.customers = state.customers.filter(customer => customer.id !== id);
-        if (activeCustomerId === id) activeCustomerId = state.customers[0]?.id || '';
-        if (viewedCustomerId === id) viewedCustomerId = '';
-        document.getElementById('customer-details').classList.add('hidden');
-        if (document.getElementById('customer-id').value === id) resetCustomerForm();
-        saveState();
-        renderCustomers();
-        refreshActiveViews();
-        showToast('Customer deleted.');
-        if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+      const customer = getCustomer(id);
+      if (!customer || isDeletedRecord(customer)) return;
+      const linkedRecords = getActivePaymentRecords().filter(record => record.customerId === id);
+      const alreadyDeletedPayments = state.records.filter(record =>
+        record.customerId === id && isDeletedRecord(record)
+      ).length;
+      const details = [
+        `Customer: ${customerDisplayName(customer)}`,
+        `Contact: ${customer.contactNumber.trim() || 'Not provided'}`,
+        `Location: ${customer.location.trim() || 'Not provided'}`,
+        `Active related payments: ${linkedRecords.length}`,
+        `Already deleted payments: ${alreadyDeletedPayments}`,
+        'The customer and active payments will move to Deleted Records together.'
+      ];
+      openTrashConfirmation({
+        title: 'Move Customer to Deleted Records',
+        description: 'The customer will be hidden from active lists but remain recoverable for one calendar month. Related payment records, readings, and billing calculations are preserved and restored together.',
+        details,
+        phrase: 'DELETE',
+        confirmLabel: 'Move to Deleted Records',
+        onConfirm: () => softDeleteCustomer(id)
       });
     }
 
@@ -962,18 +994,533 @@
       setupNewPaymentForm();
     }
 
+    function addCalendarMonth(dateValue) {
+      const date = new Date(dateValue);
+      const targetMonth = date.getMonth() + 1;
+      const targetYear = date.getFullYear() + Math.floor(targetMonth / 12);
+      const normalizedMonth = targetMonth % 12;
+      const day = date.getDate();
+      const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+      date.setFullYear(targetYear, normalizedMonth, Math.min(day, lastDay));
+      return date.toISOString();
+    }
+
+    function getTrashEntry(type, id) {
+      const collection = type === 'Customer' ? state.customers : state.records;
+      const entity = collection.find(item => item.id === id);
+      return entity && isDeletedRecord(entity) ? { type, id, entity } : null;
+    }
+
+    function getTrashEntryKey(type, id) {
+      return `${type}:${id}`;
+    }
+
+    function getTrashEntries() {
+      return [
+        ...state.customers.filter(isDeletedRecord).map(entity => ({ type: 'Customer', id: entity.id, entity })),
+        ...state.records.filter(isDeletedRecord).map(entity => ({ type: 'Payment', id: entity.id, entity }))
+      ];
+    }
+
+    function getTrashEntryCustomer(entry) {
+      return entry.type === 'Customer' ? entry.entity : getCustomer(entry.entity.customerId);
+    }
+
+    function getTrashEntryDisplayName(entry) {
+      return customerDisplayName(getTrashEntryCustomer(entry));
+    }
+
+    function getTrashDaysRemaining(entity) {
+      return Math.max(0, Math.ceil((new Date(entity.permanentDeletionAt).getTime() - Date.now()) / 86400000));
+    }
+
+    function pushTrashAudit(action, type, entity, timestamp = new Date().toISOString()) {
+      state.trashAudit.push({
+        action,
+        recordType: type,
+        recordId: String(entity.id),
+        reference: String(entity.receiptNo || entity.id),
+        deletedAt: entity.deletedAt || '',
+        deletedBy: entity.deletedBy || 'Local user',
+        permanentDeletionAt: entity.permanentDeletionAt || '',
+        occurredAt: timestamp
+      });
+    }
+
+    function persistTrashMutation(rollback, failureMessage) {
+      let saved = false;
+      try {
+        saved = rebuildLedger();
+      } catch (error) {
+        console.error('Failed applying deleted-record change:', error);
+      }
+      if (saved) return true;
+      rollback();
+      try {
+        rebuildLedger();
+      } catch (error) {
+        console.error('Failed restoring state after deleted-record change failed:', error);
+      }
+      showToast(failureMessage, 'error');
+      return false;
+    }
+
+    function softDeletePayment(id, reason = '') {
+      const record = state.records.find(item => item.id === id);
+      if (!record || isDeletedRecord(record)) return false;
+      const recordsBefore = state.records.map(item => ({ ...item }));
+      const deletedIdsBefore = [...state.deletedRecordIds];
+      const auditBefore = [...state.trashAudit];
+      const paymentSelectionBefore = [...selectedPaymentIds];
+      const groupId = makeId('TRASH');
+      const deletedAt = new Date().toISOString();
+      Object.assign(record, {
+        isDeleted: true,
+        deletedAt,
+        deletedBy: 'Local user',
+        deletionReason: reason.trim(),
+        permanentDeletionAt: addCalendarMonth(deletedAt),
+        deletionGroupId: groupId
+      });
+      pushTrashAudit('soft-deleted', 'Payment', record, deletedAt);
+      if (!state.deletedRecordIds.includes(id)) state.deletedRecordIds.push(id);
+      const saved = persistTrashMutation(() => {
+        state.records = recordsBefore;
+        state.deletedRecordIds = deletedIdsBefore;
+        state.trashAudit = auditBefore;
+        selectedPaymentIds.clear();
+        paymentSelectionBefore.forEach(recordId => selectedPaymentIds.add(recordId));
+      }, 'Payment could not be moved to Deleted Records. No changes were saved.');
+      if (!saved) return false;
+      selectedPaymentIds.delete(id);
+      showToast('Payment moved to Deleted Records. Balances were recalculated.');
+      if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+      return true;
+    }
+
+    function softDeleteCustomer(id, reason = '') {
+      const customer = getCustomer(id);
+      if (!customer || isDeletedRecord(customer)) return false;
+      const customersBefore = state.customers.map(item => ({ ...item }));
+      const recordsBefore = state.records.map(item => ({ ...item }));
+      const deletedIdsBefore = [...state.deletedRecordIds];
+      const auditBefore = [...state.trashAudit];
+      const activeCustomerBefore = activeCustomerId;
+      const viewedCustomerBefore = viewedCustomerId;
+      const paymentSelectionBefore = [...selectedPaymentIds];
+      const deletedAt = new Date().toISOString();
+      const permanentDeletionAt = addCalendarMonth(deletedAt);
+      const groupId = makeId('TRASH');
+      Object.assign(customer, {
+        isDeleted: true,
+        deletedAt,
+        deletedBy: 'Local user',
+        deletionReason: reason.trim(),
+        permanentDeletionAt,
+        deletionGroupId: groupId
+      });
+      pushTrashAudit('soft-deleted', 'Customer', customer, deletedAt);
+      state.records.forEach(record => {
+        if (record.customerId !== id || isDeletedRecord(record)) return;
+        Object.assign(record, {
+          isDeleted: true,
+          deletedAt,
+          deletedBy: 'Local user',
+          deletionReason: reason.trim(),
+          permanentDeletionAt,
+          deletionGroupId: groupId
+        });
+        pushTrashAudit('soft-deleted', 'Payment', record, deletedAt);
+        if (!state.deletedRecordIds.includes(record.id)) state.deletedRecordIds.push(record.id);
+      });
+      if (activeCustomerId === id) activeCustomerId = '';
+      if (viewedCustomerId === id) {
+        viewedCustomerId = '';
+        document.getElementById('customer-details').classList.add('hidden');
+      }
+      const saved = persistTrashMutation(() => {
+        state.customers = customersBefore;
+        state.records = recordsBefore;
+        state.deletedRecordIds = deletedIdsBefore;
+        state.trashAudit = auditBefore;
+        activeCustomerId = activeCustomerBefore;
+        viewedCustomerId = viewedCustomerBefore;
+        selectedPaymentIds.clear();
+        paymentSelectionBefore.forEach(recordId => selectedPaymentIds.add(recordId));
+      }, 'Customer could not be moved to Deleted Records. No changes were saved.');
+      if (!saved) return false;
+      selectedPaymentIds.forEach(recordId => {
+        if (state.records.some(record => record.id === recordId && record.customerId === id)) selectedPaymentIds.delete(recordId);
+      });
+      if (document.getElementById('customer-id').value === id) resetCustomerForm();
+      showToast('Customer and related payments moved to Deleted Records.');
+      if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+      return true;
+    }
+
+    function getTrashRestoreEntries(entry) {
+      const groupId = entry.entity.deletionGroupId;
+      const entries = getTrashEntries().filter(candidate =>
+        candidate.type === entry.type && candidate.id === entry.id ||
+        groupId && candidate.entity.deletionGroupId === groupId
+      );
+      if (entry.type === 'Payment') {
+        const customer = getCustomer(entry.entity.customerId);
+        if (customer && isDeletedRecord(customer)) {
+          entries.push({ type: 'Customer', id: customer.id, entity: customer });
+          if (customer.deletionGroupId) {
+            entries.push(...getTrashEntries().filter(candidate => candidate.entity.deletionGroupId === customer.deletionGroupId));
+          }
+        }
+      }
+      return [...new Map(entries.map(candidate => [getTrashEntryKey(candidate.type, candidate.id), candidate])).values()];
+    }
+
+    function restoreTrashRecords(entries) {
+      const restoreEntries = [...new Map(entries.flatMap(entry => getTrashRestoreEntries(entry))
+        .map(entry => [getTrashEntryKey(entry.type, entry.id), entry])).values()];
+      if (!restoreEntries.length) return false;
+      const customersBefore = state.customers.map(item => ({ ...item }));
+      const recordsBefore = state.records.map(item => ({ ...item }));
+      const deletedIdsBefore = [...state.deletedRecordIds];
+      const auditBefore = [...state.trashAudit];
+      const restoredAt = new Date().toISOString();
+      restoreEntries.forEach(candidate => {
+        pushTrashAudit('restored', candidate.type, candidate.entity, restoredAt);
+        candidate.entity.isDeleted = false;
+        candidate.entity.deletedAt = null;
+        candidate.entity.deletedBy = null;
+        candidate.entity.permanentDeletionAt = null;
+        candidate.entity.restoredAt = restoredAt;
+        candidate.entity.restoredBy = 'Local user';
+        candidate.entity.deletionGroupId = null;
+        if (candidate.type === 'Payment') {
+          state.deletedRecordIds = state.deletedRecordIds.filter(recordId => recordId !== candidate.id);
+        }
+      });
+      const saved = persistTrashMutation(() => {
+        state.customers = customersBefore;
+        state.records = recordsBefore;
+        state.deletedRecordIds = deletedIdsBefore;
+        state.trashAudit = auditBefore;
+      }, 'Record could not be restored. No changes were saved.');
+      if (!saved) return false;
+      restoreEntries.forEach(entry => selectedTrashIds.delete(getTrashEntryKey(entry.type, entry.id)));
+      showToast(restoreEntries.length > 1 ? 'Customer and related payment history restored.' : 'Record restored.');
+      renderDeletedRecords();
+      if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+      return true;
+    }
+
+    function restoreTrashRecord(type, id) {
+      const entry = getTrashEntry(type, id);
+      return entry ? restoreTrashRecords([entry]) : false;
+    }
+
+    function expandPermanentDeleteEntries(entries) {
+      const expanded = [...entries];
+      entries.filter(entry => entry.type === 'Customer').forEach(customerEntry => {
+        expanded.push(...getTrashEntries().filter(entry =>
+          entry.type === 'Payment' && entry.entity.customerId === customerEntry.id
+        ));
+      });
+      return [...new Map(expanded.map(entry => [getTrashEntryKey(entry.type, entry.id), entry])).values()];
+    }
+
+    function permanentlyDeleteTrashEntries(entries) {
+      const targets = expandPermanentDeleteEntries(entries);
+      if (!targets.length) return false;
+      const customersBefore = state.customers.map(item => ({ ...item }));
+      const recordsBefore = state.records.map(item => ({ ...item }));
+      const deletedIdsBefore = [...state.deletedRecordIds];
+      const auditBefore = [...state.trashAudit];
+      const trashSelectionBefore = [...selectedTrashIds];
+      const paymentSelectionBefore = [...selectedPaymentIds];
+      const purgedAt = new Date().toISOString();
+      targets.forEach(entry => {
+        pushTrashAudit('permanently-deleted', entry.type, entry.entity, purgedAt);
+        selectedTrashIds.delete(getTrashEntryKey(entry.type, entry.id));
+        if (entry.type === 'Customer') {
+          state.customers = state.customers.filter(customer => customer.id !== entry.id);
+        } else {
+          state.records = state.records.filter(record => record.id !== entry.id);
+          if (!state.deletedRecordIds.includes(entry.id)) state.deletedRecordIds.push(entry.id);
+          selectedPaymentIds.delete(entry.id);
+        }
+      });
+      const saved = persistTrashMutation(() => {
+        state.customers = customersBefore;
+        state.records = recordsBefore;
+        state.deletedRecordIds = deletedIdsBefore;
+        state.trashAudit = auditBefore;
+        selectedTrashIds.clear();
+        trashSelectionBefore.forEach(key => selectedTrashIds.add(key));
+        selectedPaymentIds.clear();
+        paymentSelectionBefore.forEach(recordId => selectedPaymentIds.add(recordId));
+      }, 'Permanent deletion failed. The records remain in Deleted Records.');
+      if (!saved) return false;
+      showToast(targets.length > 1 ? `${targets.length} records permanently deleted.` : 'Record permanently deleted.');
+      renderDeletedRecords();
+      if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+      return true;
+    }
+
+    function cleanupExpiredTrash() {
+      const now = Date.now();
+      const entries = getTrashEntries();
+      const expiredCustomerGroups = new Set(entries
+        .filter(entry => entry.type === 'Customer' && new Date(entry.entity.permanentDeletionAt).getTime() <= now)
+        .map(entry => entry.entity.deletionGroupId)
+        .filter(Boolean));
+      const expired = entries.filter(entry =>
+        new Date(entry.entity.permanentDeletionAt).getTime() <= now ||
+        entry.type === 'Payment' && expiredCustomerGroups.has(entry.entity.deletionGroupId)
+      );
+      if (!expired.length) return 0;
+      const auditBefore = [...state.trashAudit];
+      const recordsBefore = state.records.map(item => ({ ...item }));
+      const customersBefore = state.customers.map(item => ({ ...item }));
+      const deletedIdsBefore = [...state.deletedRecordIds];
+      const purgeAt = new Date().toISOString();
+      const targets = expandPermanentDeleteEntries(expired);
+      targets.forEach(entry => {
+        pushTrashAudit('automatically-purged', entry.type, entry.entity, purgeAt);
+        if (entry.type === 'Customer') {
+          state.customers = state.customers.filter(customer => customer.id !== entry.id);
+        } else {
+          state.records = state.records.filter(record => record.id !== entry.id);
+          if (!state.deletedRecordIds.includes(entry.id)) state.deletedRecordIds.push(entry.id);
+        }
+      });
+      if (!saveState()) {
+        state.trashAudit = auditBefore;
+        state.records = recordsBefore;
+        state.customers = customersBefore;
+        state.deletedRecordIds = deletedIdsBefore;
+        console.error('Automatic expired-record cleanup was not persisted; expired records remain available.');
+        return 0;
+      }
+      return targets.length;
+    }
+
+    function renderDeletedRecords() {
+      cleanupExpiredTrash();
+      const tbody = document.getElementById('trash-tbody');
+      if (!tbody) return;
+      const entries = getTrashEntries();
+      const typeFilter = document.getElementById('trash-type-filter');
+      const byFilter = document.getElementById('trash-by-filter');
+      const selectedType = typeFilter.value;
+      const selectedBy = byFilter.value;
+      const setOptions = (select, values, firstLabel) => {
+        select.replaceChildren(new Option(firstLabel, ''));
+        values.forEach(value => select.appendChild(new Option(value, value)));
+        select.value = values.includes(select === typeFilter ? selectedType : selectedBy)
+          ? select === typeFilter ? selectedType : selectedBy
+          : '';
+      };
+      setOptions(typeFilter, [...new Set(entries.map(entry => entry.type))].sort(), 'All types');
+      setOptions(byFilter, [...new Set(entries.map(entry => entry.entity.deletedBy || 'Local user'))].sort(), 'Anyone');
+
+      const query = document.getElementById('trash-search').value.trim().toLocaleLowerCase();
+      const dateFilter = document.getElementById('trash-date-filter').value;
+      const remainingFilter = Number(document.getElementById('trash-remaining-filter').value) || 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let filtered = entries.filter(entry => {
+        const customer = getTrashEntryCustomer(entry);
+        if (typeFilter.value && entry.type !== typeFilter.value) return false;
+        if (byFilter.value && (entry.entity.deletedBy || 'Local user') !== byFilter.value) return false;
+        const deletedDate = new Date(entry.entity.deletedAt);
+        if (dateFilter === 'today' && toLocalDateISO(deletedDate) !== toLocalDateISO(today)) return false;
+        if (dateFilter === 'week' && deletedDate.getTime() < today.getTime() - 7 * 86400000) return false;
+        if (dateFilter === 'month' && deletedDate.getTime() < today.getTime() - 30 * 86400000) return false;
+        if (remainingFilter && getTrashDaysRemaining(entry.entity) > remainingFilter) return false;
+        const text = [
+          entry.type, customer?.customerName, customer?.contactNumber, customer?.location,
+          entry.entity.receiptNo, entry.entity.id, entry.entity.date, formatDateForDisplay(entry.entity.date)
+        ].join(' ').toLocaleLowerCase();
+        return !query || text.includes(query);
+      });
+      switch (document.getElementById('trash-sort').value) {
+        case 'oldest':
+          filtered.sort((a, b) => new Date(a.entity.deletedAt) - new Date(b.entity.deletedAt));
+          break;
+        case 'expiring':
+          filtered.sort((a, b) => new Date(a.entity.permanentDeletionAt) - new Date(b.entity.permanentDeletionAt));
+          break;
+        case 'customer-az':
+          filtered.sort((a, b) => getTrashEntryDisplayName(a).localeCompare(getTrashEntryDisplayName(b)));
+          break;
+        default:
+          filtered.sort((a, b) => new Date(b.entity.deletedAt) - new Date(a.entity.deletedAt));
+      }
+
+      const filteredKeys = new Set(filtered.map(entry => getTrashEntryKey(entry.type, entry.id)));
+      selectedTrashIds.forEach(key => { if (!filteredKeys.has(key)) selectedTrashIds.delete(key); });
+      document.getElementById('trash-count').textContent =
+        `${filtered.length.toLocaleString()} deleted ${filtered.length === 1 ? 'record' : 'records'} found`;
+      const selectedEntries = filtered.filter(entry => selectedTrashIds.has(getTrashEntryKey(entry.type, entry.id)));
+      const selectionSummary = document.getElementById('trash-selection-summary');
+      const restoreSelected = document.getElementById('trash-restore-selected');
+      const deleteSelected = document.getElementById('trash-delete-selected');
+      selectionSummary.textContent = `${selectedEntries.length} selected`;
+      selectionSummary.classList.toggle('hidden', !selectedEntries.length);
+      restoreSelected.classList.toggle('hidden', !selectedEntries.length);
+      deleteSelected.classList.toggle('hidden', !selectedEntries.length);
+      const selectAll = document.getElementById('trash-select-all');
+      selectAll.checked = filtered.length > 0 && selectedEntries.length === filtered.length;
+      selectAll.indeterminate = selectedEntries.length > 0 && selectedEntries.length < filtered.length;
+      selectAll.disabled = !filtered.length;
+
+      tbody.replaceChildren();
+      if (!filtered.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 9;
+        cell.className = 'px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400';
+        cell.innerHTML = `<p class="font-semibold text-gray-700 dark:text-gray-200">No deleted records found</p>
+          <p class="mt-1 text-xs">Deleted items will appear here for one calendar month.</p>
+          <button type="button" onclick="clearTrashFilters()" class="mt-3 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:underline">Clear Filters</button>`;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        return;
+      }
+
+      filtered.forEach(entry => {
+        const { entity, type } = entry;
+        const customer = getTrashEntryCustomer(entry);
+        const remaining = getTrashDaysRemaining(entity);
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-gray-50 dark:hover:bg-gray-700/30';
+        row.dataset.trashKey = getTrashEntryKey(type, entry.id);
+        const checkboxCell = document.createElement('td');
+        checkboxCell.className = 'px-3 py-3';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = selectedTrashIds.has(getTrashEntryKey(type, entry.id));
+        checkbox.setAttribute('aria-label', `Select deleted ${type.toLowerCase()} ${getTrashEntryDisplayName(entry)}`);
+        checkbox.className = 'rounded border-gray-300 text-amber-600 focus:ring-amber-500';
+        checkbox.addEventListener('change', () => {
+          const key = getTrashEntryKey(type, entry.id);
+          if (checkbox.checked) selectedTrashIds.add(key);
+          else selectedTrashIds.delete(key);
+          renderDeletedRecords();
+        });
+        checkboxCell.appendChild(checkbox);
+        row.appendChild(checkboxCell);
+        const values = [
+          type,
+          getTrashEntryDisplayName(entry),
+          `${customer?.contactNumber?.trim() || '—'}${customer?.location?.trim() ? `\n${customer.location}` : ''}`,
+          type === 'Payment'
+            ? `${entity.receiptNo || entity.id}\n${formatDateForDisplay(entity.date)}`
+            : `Customer ID: ${entity.id}\nCreated: ${formatDateForDisplay(String(entity.createdAt || '').slice(0, 10))}`,
+          type === 'Payment' ? `Rs. ${formatReceiptAmount(entity.amountPaid)}` : '—',
+          `${formatDateForDisplay(String(entity.deletedAt || '').slice(0, 10))}\n${entity.deletedBy || 'Local user'}`,
+          remaining === 0 ? 'Permanent deletion today' : `In ${remaining} ${remaining === 1 ? 'day' : 'days'}\n${formatDateForDisplay(String(entity.permanentDeletionAt || '').slice(0, 10))}`
+        ];
+        values.forEach((value, index) => {
+          const cell = document.createElement('td');
+          cell.className = `px-3 py-3 text-xs whitespace-pre-line ${index === 4 ? 'text-right font-semibold' : ''}`;
+          cell.textContent = value;
+          if (index === 0) {
+            cell.innerHTML = `<span class="inline-flex rounded-full bg-amber-100 dark:bg-amber-950/50 px-2 py-1 text-[10px] font-bold text-amber-800 dark:text-amber-300">${escapeHtml(value)}</span>`;
+          }
+          if (index === 6 && remaining <= 3) cell.classList.add('font-semibold', 'text-amber-700', 'dark:text-amber-300');
+          row.appendChild(cell);
+        });
+        const actions = document.createElement('td');
+        actions.className = 'px-3 py-3 text-right whitespace-nowrap';
+        const restore = document.createElement('button');
+        restore.type = 'button';
+        restore.className = 'mr-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40';
+        restore.textContent = 'Restore';
+        restore.addEventListener('click', () => restoreTrashRecord(type, entry.id));
+        const permanentlyDelete = document.createElement('button');
+        permanentlyDelete.type = 'button';
+        permanentlyDelete.className = 'rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40';
+        permanentlyDelete.textContent = 'Delete Permanently';
+        permanentlyDelete.addEventListener('click', () => confirmPermanentDelete([entry]));
+        actions.append(restore, permanentlyDelete);
+        row.appendChild(actions);
+        tbody.appendChild(row);
+      });
+    }
+
+    function clearTrashFilters() {
+      ['trash-search', 'trash-type-filter', 'trash-by-filter', 'trash-date-filter', 'trash-remaining-filter'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('trash-sort').value = 'recent';
+      renderDeletedRecords();
+    }
+
+    function toggleSelectAllTrash(checked) {
+      const entries = getFilteredTrashEntries();
+      entries.forEach(entry => {
+        const key = getTrashEntryKey(entry.type, entry.id);
+        if (checked) selectedTrashIds.add(key);
+        else selectedTrashIds.delete(key);
+      });
+      renderDeletedRecords();
+    }
+
+    function getFilteredTrashEntries() {
+      const keys = new Set(Array.from(document.querySelectorAll('#trash-tbody input[type="checkbox"]'))
+        .map(input => {
+          const row = input.closest('tr');
+          return row?.dataset.trashKey;
+        }).filter(Boolean));
+      return getTrashEntries().filter(entry => keys.has(getTrashEntryKey(entry.type, entry.id)));
+    }
+
+    function getSelectedTrashEntries() {
+      return getTrashEntries().filter(entry => selectedTrashIds.has(getTrashEntryKey(entry.type, entry.id)));
+    }
+
+    function restoreSelectedTrashRecords() {
+      restoreTrashRecords(getSelectedTrashEntries());
+      renderDeletedRecords();
+    }
+
+    function permanentlyDeleteSelectedTrashRecords() {
+      const selected = getSelectedTrashEntries();
+      if (selected.length) confirmPermanentDelete(selected);
+    }
+
+    function confirmPermanentDelete(entries) {
+      const targets = expandPermanentDeleteEntries(entries);
+      const phrase = targets.length === 1 ? 'PERMANENT DELETE' : `PERMANENT DELETE ${targets.length}`;
+      const describeEntry = entry => entry.type === 'Payment'
+        ? `Payment: ${getTrashEntryDisplayName(entry)} · ${entry.entity.receiptNo || entry.entity.id} · Rs. ${formatReceiptAmount(entry.entity.amountPaid)} · ${formatDateForDisplay(entry.entity.date)}`
+        : `Customer: ${getTrashEntryDisplayName(entry)} · ${entry.entity.contactNumber?.trim() || 'No contact'} · ${entry.entity.id}`;
+      const details = targets.length > 10
+        ? [`Selected records: ${targets.length}`, ...targets.slice(0, 8).map(describeEntry), `…and ${targets.length - 8} more`]
+        : targets.map(describeEntry);
+      openTrashConfirmation({
+        title: targets.length === 1 ? 'Permanently Delete Record' : `Permanently Delete ${targets.length} Records`,
+        description: 'This action permanently removes the selected deleted data from this browser and cannot be undone. Ensure you have a trusted backup if you may need this history again.',
+        details,
+        phrase,
+        confirmLabel: 'Delete Permanently',
+        onConfirm: () => permanentlyDeleteTrashEntries(targets)
+      });
+    }
+
     function setupNewPaymentForm(recordToEdit = null, clearCustomer = false) {
-      const record = recordToEdit || (editingRecordId ? state.records.find(r => r.id === editingRecordId) : null);
+      const record = recordToEdit || (editingRecordId ? state.records.find(r => r.id === editingRecordId && !isDeletedRecord(r)) : null);
       const customerSelect = document.getElementById('input-customer');
-      const preferredCustomerId = record?.customerId || (clearCustomer ? '' : activeCustomerId || customerSelect.value || state.customers[0]?.id || '');
+      const activeCustomers = getActiveCustomers();
+      const preferredCustomerId = record?.customerId || (clearCustomer ? '' : activeCustomerId || customerSelect.value || activeCustomers[0]?.id || '');
       customerSelect.replaceChildren();
       const prompt = document.createElement('option');
       prompt.value = '';
-      prompt.textContent = state.customers.length ? 'Select a customer' : 'Add a customer first';
+      prompt.textContent = activeCustomers.length ? 'Select a customer' : 'Add a customer first';
       prompt.disabled = true;
       prompt.selected = !preferredCustomerId;
       customerSelect.appendChild(prompt);
-      state.customers.forEach(customer => {
+      activeCustomers.forEach(customer => {
         const option = document.createElement('option');
         option.value = customer.id;
         option.textContent = customerDisplayName(customer);
@@ -1354,13 +1901,14 @@
       const locationValue = locationSelect.value;
       const customerQuery = document.getElementById('records-customer-search').value.trim().toLocaleLowerCase();
 
-      setDynamicSelectOptions(customerSelect, 'All customers', state.customers
+      setDynamicSelectOptions(customerSelect, 'All customers', getActiveCustomers()
         .filter(customer => !customerQuery ||
           `${customer.customerName} ${customer.contactNumber} ${customer.location}`.toLocaleLowerCase().includes(customerQuery))
         .map(customer => ({ value: customer.id, label: customerDisplayName(customer) }))
         .sort((a, b) => a.label.localeCompare(b.label)), customerValue);
 
-      const statuses = [...new Set(state.records.map(record => record.status).filter(Boolean))]
+      const activeRecords = getActivePaymentRecords();
+      const statuses = [...new Set(activeRecords.map(record => record.status).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b));
       setDynamicSelectOptions(statusSelect, 'All statuses', statuses.map(value => ({
         value,
@@ -1369,11 +1917,11 @@
 
       const methods = [...new Set([
         ...(Array.isArray(state.settings.paymentMethods) ? state.settings.paymentMethods : []),
-        ...state.records.map(record => record.paymentMethod).filter(Boolean)
+        ...activeRecords.map(record => record.paymentMethod).filter(Boolean)
       ])].sort((a, b) => a.localeCompare(b));
       setDynamicSelectOptions(methodSelect, 'All methods', methods.map(value => ({ value, label: value })), methodValue);
 
-      const locations = [...new Set(state.customers.map(customer => customer.location?.trim()).filter(Boolean))]
+      const locations = [...new Set(getActiveCustomers().map(customer => customer.location?.trim()).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b));
       setDynamicSelectOptions(locationSelect, 'All locations', locations.map(value => ({ value, label: value })), locationValue);
     }
@@ -1494,7 +2042,7 @@
       const amountRange = getRecordsFilterRange('amount-paid');
       const rangeKeys = getRecordsRangeFilterKeys();
 
-      const filtered = state.records.filter(record => {
+      const filtered = getActivePaymentRecords().filter(record => {
         const customer = getCustomerForRecord(record);
         if (customerId && record.customerId !== customerId) return false;
         if (status && record.status !== status) return false;
@@ -1799,7 +2347,7 @@
     }
 
     function updatePaymentSelectionSummary(filtered = getFilteredPaymentRecords()) {
-      const selectedRecords = state.records.filter(record => selectedPaymentIds.has(record.id));
+      const selectedRecords = getActivePaymentRecords().filter(record => selectedPaymentIds.has(record.id));
       const total = selectedRecords.reduce((sum, record) => sum + Number(record.amountPaid || 0), 0);
       const summary = document.getElementById('records-selection-summary');
       const clearButton = document.getElementById('clear-payment-selection');
@@ -1830,8 +2378,8 @@
 
     function togglePaymentSelection(id, selected) {
       if (selected) {
-        const record = state.records.find(item => item.id === id);
-        const selectedCustomerId = state.records.find(item => selectedPaymentIds.has(item.id))?.customerId;
+        const record = getActivePaymentRecords().find(item => item.id === id);
+        const selectedCustomerId = getActivePaymentRecords().find(item => selectedPaymentIds.has(item.id))?.customerId;
         if (selectedCustomerId && record?.customerId !== selectedCustomerId) {
           showToast('Combined receipts can include payments for one customer only.', 'error');
           renderRecordsTable();
@@ -1846,7 +2394,7 @@
     function toggleSelectAllPayments(select) {
       const filtered = getFilteredPaymentRecords();
       const filteredCustomerIds = new Set(filtered.map(record => record.customerId));
-      const alreadySelectedCustomerId = state.records.find(record => selectedPaymentIds.has(record.id))?.customerId;
+      const alreadySelectedCustomerId = getActivePaymentRecords().find(record => selectedPaymentIds.has(record.id))?.customerId;
       if (select && (filteredCustomerIds.size > 1 ||
           (alreadySelectedCustomerId && [...filteredCustomerIds].some(id => id !== alreadySelectedCustomerId)))) {
         showToast('Search for one customer before selecting all payments for a combined receipt.', 'error');
@@ -1863,7 +2411,7 @@
     }
 
     function generateCombinedReceipt() {
-      const selectedRecords = state.records.filter(record => selectedPaymentIds.has(record.id));
+      const selectedRecords = getActivePaymentRecords().filter(record => selectedPaymentIds.has(record.id));
       if (selectedRecords.length === 0) {
         showToast('Select at least one payment record to generate a combined receipt.', 'error');
         return;
@@ -1924,20 +2472,31 @@
 
     function startEditRecord(id) {
       const record = state.records.find(item => item.id === id);
-      if (!record) return;
+      if (!record || isDeletedRecord(record)) return;
       setPaymentFormMode(id);
       setupNewPaymentForm(record);
       switchTab('new-payment');
     }
 
     function deleteRecord(id) {
-      showModal("Delete Payment Record", "Are you sure you want to delete this payment record? Ledger balance will be recalculated.", () => {
-        if (!state.deletedRecordIds.includes(id)) state.deletedRecordIds.push(id);
-        selectedPaymentIds.delete(id);
-        state.records = state.records.filter(r => r.id !== id);
-        rebuildLedger();
-        showToast("Record deleted and ledger recalculated.");
-        if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+      const record = state.records.find(item => item.id === id);
+      if (!record || isDeletedRecord(record)) return;
+      const customer = getCustomerForRecord(record);
+      openTrashConfirmation({
+        title: 'Move Payment to Deleted Records',
+        description: 'This financial record affects payment history, receipts, due and advance balances. Moving it to Deleted Records will recalculate active balances. It remains recoverable for one calendar month.',
+        details: [
+          `Customer: ${customerDisplayName(customer)}`,
+          `Payment date: ${formatDateForDisplay(record.date)}`,
+          `Amount paid: Rs. ${formatReceiptAmount(record.amountPaid)}`,
+          `Payment method: ${record.paymentMethod || '—'}`,
+          `Reference: ${record.receiptNo || record.id}`,
+          `Status: ${record.status || '—'}`,
+          `Billed amount: Rs. ${formatReceiptAmount(record.billCost)}`
+        ],
+        phrase: 'DELETE',
+        confirmLabel: 'Move to Deleted Records',
+        onConfirm: () => softDeletePayment(id)
       });
     }
 
@@ -1954,16 +2513,17 @@
     }
 
     function renderAnalytics() {
+      const activeRecords = getActivePaymentRecords();
       // 1. Calculate KPIs
-      const totalUnits = state.records.reduce((acc, r) => acc + r.units, 0);
-      const totalBilled = state.records.reduce((acc, r) => acc + r.billCost, 0);
-      const avgBill = state.records.length > 0 ? Math.round(totalBilled / state.records.length) : 0;
-      const maxBill = state.records.length > 0 ? Math.max(...state.records.map(r => r.billCost)) : 0;
+      const totalUnits = activeRecords.reduce((acc, r) => acc + r.units, 0);
+      const totalBilled = activeRecords.reduce((acc, r) => acc + r.billCost, 0);
+      const avgBill = activeRecords.length > 0 ? Math.round(totalBilled / activeRecords.length) : 0;
+      const maxBill = activeRecords.length > 0 ? Math.max(...activeRecords.map(r => r.billCost)) : 0;
 
       document.getElementById('analytics-total-units').textContent = `${totalUnits.toLocaleString()} kWh`;
       document.getElementById('analytics-avg-bill').textContent = `Rs. ${avgBill.toLocaleString()}`;
       document.getElementById('analytics-max-bill').textContent = `Rs. ${maxBill.toLocaleString()}`;
-      document.getElementById('analytics-total-records').textContent = state.records.length;
+      document.getElementById('analytics-total-records').textContent = activeRecords.length;
 
       // 2. Destroy existing charts to prevent canvas loop and memory leak
       destroyCharts();
@@ -1972,10 +2532,10 @@
       const textColor = isDark ? '#9ca3af' : '#4b5563';
       const gridColor = isDark ? '#374151' : '#e5e7eb';
 
-      const labels = state.records.map(r => formatDateForDisplay(r.date));
-      const unitsData = state.records.map(r => r.units);
-      const billedData = state.records.map(r => r.billCost);
-      const paidData = state.records.map(r => r.amountPaid);
+      const labels = activeRecords.map(r => formatDateForDisplay(r.date));
+      const unitsData = activeRecords.map(r => r.units);
+      const billedData = activeRecords.map(r => r.billCost);
+      const paidData = activeRecords.map(r => r.amountPaid);
 
       // Common chart options enforcing maintainAspectRatio: false inside fixed parent
       const commonOptions = {
@@ -2030,7 +2590,7 @@
       const ctx3 = document.getElementById('chart-methods')?.getContext('2d');
       if (ctx3) {
         const methodCounts = {};
-        state.records.forEach(r => {
+        activeRecords.forEach(r => {
           methodCounts[r.paymentMethod] = (methodCounts[r.paymentMethod] || 0) + 1;
         });
 
@@ -2060,7 +2620,8 @@
     function renderSnapshotView() {
       const latest = getLatestLedgerState();
       const customer = getCustomer(activeCustomerId);
-      document.getElementById('snap-customer-name').textContent = customer ? customerDisplayName(customer) : '—';
+      const activeCustomer = customer && !isDeletedRecord(customer) ? customer : null;
+      document.getElementById('snap-customer-name').textContent = activeCustomer ? customerDisplayName(activeCustomer) : '—';
       document.getElementById('snap-advance').textContent = `Rs. ${latest.currentAdvance.toLocaleString()}`;
       document.getElementById('snap-due').textContent = `Rs. ${latest.currentDue.toLocaleString()}`;
       document.getElementById('snap-last-reading').textContent = latest.hasPreviousReading
@@ -2577,7 +3138,7 @@
 
       const activeBilled = activeRecords.reduce((sum, record) => sum + Number(record.billCost), 0);
       const activePaid = activeRecords.reduce((sum, record) => sum + Number(record.amountPaid), 0);
-      const currentBalances = state.customers.reduce((totals, customer) => {
+      const currentBalances = getActiveCustomers().reduce((totals, customer) => {
         const latest = getLatestLedgerState(customer.id);
         totals.due += latest.currentDue;
         totals.advance += latest.currentAdvance;
@@ -2734,7 +3295,7 @@
 
         setExcelBackupStatus('Checking records and synchronizing the master workbook…');
         stateBeforeSync = JSON.parse(JSON.stringify(state));
-        const appRecords = state.records.map(record => ({ ...record }));
+        const appRecords = getActivePaymentRecords().map(record => ({ ...record }));
         const appById = new Map();
         for (const record of appRecords) {
           if (!record.id || appById.has(record.id)) throw new Error('The application contains a missing or duplicate Record ID. No workbook changes were made.');
@@ -2830,22 +3391,29 @@
         }
 
         const knownRows = new Map(existingRows.map(record => [record.id, record]));
-        for (const record of state.records) {
+        for (const record of appRecords) {
           const previous = knownRows.get(record.id);
           if (!previous) added++;
           else if (!sameExcelRecord(record, previous) || previous.recordStatus === 'DELETED') updated++;
         }
         rebuildLedger();
-        const activeRows = state.records.map(record => excelRowFromAppRecord(record, 'ACTIVE'));
+        const activeRecordsForBackup = getActivePaymentRecords();
+        const activeRows = activeRecordsForBackup.map(record => excelRowFromAppRecord(record, 'ACTIVE'));
         const activeIds = new Set(activeRows.map(record => record.id));
-        const archivedRows = existingRows
+        const archivedRowsById = new Map(existingRows
           .filter(record => !activeIds.has(record.id))
-          .map(record => ({ ...record, recordStatus: 'DELETED' }));
+          .map(record => [record.id, { ...record, recordStatus: 'DELETED' }]));
+        state.records.filter(isDeletedRecord).forEach(record => {
+          if (!archivedRowsById.has(record.id)) {
+            archivedRowsById.set(record.id, excelRowFromAppRecord(record, 'DELETED'));
+          }
+        });
+        const archivedRows = [...archivedRowsById.values()];
 
         const syncResult = { added, updated, deleted, restored };
-        buildExcelBackupWorkbook(workbook, state.records, archivedRows, metadata, syncResult);
+        buildExcelBackupWorkbook(workbook, activeRecordsForBackup, archivedRows, metadata, syncResult);
         const expectedRecords = [
-          ...state.records,
+          ...activeRecordsForBackup,
           ...archivedRows
         ];
         const verifiedTotal = await writeExcelBackup(fileHandle, workbook, oldBytes, expectedRecords);
@@ -2972,6 +3540,10 @@
       showModal("Reset System State", "Are you sure you want to reset all records and settings? This action cannot be undone.", () => {
         state.records = [];
         state.customers = [];
+        state.deletedRecordIds = [];
+        state.trashAudit = [];
+        selectedTrashIds.clear();
+        selectedPaymentIds.clear();
         activeCustomerId = '';
         state.settings = { rate: 10, receiptPrefix: "EPR-", paymentMethods: ["Cash", "eSewa", "Khalti", "Bank Transfer"] };
         rebuildLedger();
@@ -2985,7 +3557,7 @@
        ========================================================================== */
     function viewReceipt(id) {
       const rec = state.records.find(r => r.id === id);
-      if (!rec) return;
+      if (!rec || isDeletedRecord(rec)) return;
 
       activeReceiptType = 'single';
       document.getElementById('combined-receipt-card').classList.add('hidden');
@@ -3095,6 +3667,110 @@
       };
 
       document.getElementById('custom-modal').classList.remove('hidden');
+    }
+
+    let activeTrashConfirmation = null;
+    let trashConfirmationTrigger = null;
+
+    function openTrashConfirmation({ title, description, details, phrase, confirmLabel, onConfirm }) {
+      trashConfirmationTrigger = document.activeElement;
+      activeTrashConfirmation = { phrase, onConfirm, confirmLabel };
+      trashConfirmationInProgress = false;
+      document.getElementById('trash-confirmation-title').textContent = title;
+      document.getElementById('trash-confirmation-description').textContent = description;
+      const detailList = document.getElementById('trash-confirmation-details');
+      detailList.replaceChildren();
+      details.forEach(detail => {
+        const item = document.createElement('li');
+        item.textContent = detail;
+        detailList.appendChild(item);
+      });
+      document.getElementById('trash-confirmation-phrase-label').textContent = `Type exactly: ${phrase}`;
+      const input = document.getElementById('trash-confirmation-phrase');
+      input.value = '';
+      input.placeholder = phrase;
+      const button = document.getElementById('trash-confirmation-submit');
+      button.textContent = confirmLabel;
+      button.disabled = true;
+      document.getElementById('trash-confirmation-modal').classList.remove('hidden');
+      lucide.createIcons();
+      window.setTimeout(() => input.focus(), 0);
+    }
+
+    function updateTrashConfirmationButton() {
+      const input = document.getElementById('trash-confirmation-phrase');
+      document.getElementById('trash-confirmation-submit').disabled =
+        !activeTrashConfirmation || input.value !== activeTrashConfirmation.phrase || trashConfirmationInProgress;
+    }
+
+    function handleTrashConfirmationKeydown(event) {
+      if (event.key === 'Enter') event.preventDefault();
+      if (event.key === 'Escape') closeTrashConfirmation();
+      if (event.key === 'Tab') {
+        const focusable = [
+          document.getElementById('trash-confirmation-phrase'),
+          document.getElementById('trash-confirmation-cancel'),
+          ...(!document.getElementById('trash-confirmation-submit').disabled
+            ? [document.getElementById('trash-confirmation-submit')]
+            : [])
+        ];
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    function restoreTrashConfirmationFocus() {
+      const target = trashConfirmationTrigger;
+      trashConfirmationTrigger = null;
+      if (target?.isConnected) target.focus();
+      else document.getElementById('nav-trash').focus();
+    }
+
+    function closeTrashConfirmation() {
+      if (trashConfirmationInProgress) return;
+      document.getElementById('trash-confirmation-modal').classList.add('hidden');
+      document.getElementById('trash-confirmation-phrase').value = '';
+      activeTrashConfirmation = null;
+      restoreTrashConfirmationFocus();
+    }
+
+    async function confirmTrashAction() {
+      if (!activeTrashConfirmation || trashConfirmationInProgress) return;
+      const input = document.getElementById('trash-confirmation-phrase');
+      if (input.value !== activeTrashConfirmation.phrase) return;
+      trashConfirmationInProgress = true;
+      const button = document.getElementById('trash-confirmation-submit');
+      const cancel = document.getElementById('trash-confirmation-cancel');
+      const action = activeTrashConfirmation.onConfirm;
+      button.disabled = true;
+      cancel.disabled = true;
+      button.textContent = 'Processing...';
+      try {
+        const success = await action();
+        if (success) {
+          document.getElementById('trash-confirmation-modal').classList.add('hidden');
+          input.value = '';
+          activeTrashConfirmation = null;
+          restoreTrashConfirmationFocus();
+        }
+      } catch (error) {
+        console.error('Deleted-record action failed:', error);
+        showToast(`Action failed: ${error.message || 'Please try again.'}`, 'error');
+      } finally {
+        trashConfirmationInProgress = false;
+        cancel.disabled = false;
+        if (activeTrashConfirmation) {
+          button.textContent = activeTrashConfirmation.confirmLabel;
+          updateTrashConfirmationButton();
+        }
+      }
     }
 
     function closeModal() {

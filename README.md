@@ -14,6 +14,12 @@ Customers are stored separately from payment records with a required `customerNa
 
 JSON backups include the customer directory. Excel backups keep a Customer Directory sheet and link payment rows to customers by ID.
 
+## Deleted records
+
+Deleting a customer or payment moves it to Deleted Records instead of removing it immediately. Deleted customers and their active payments are grouped so restoring the customer restores the related payment history and recalculates active balances. Deleted payments are excluded from active lists, reports, receipts, and ledger calculations until restored. Permanently deleted items are recorded in a minimal local audit log.
+
+Trash items are retained for one calendar month. Because ElectroPay currently runs entirely in the browser and stores data in `localStorage`, automatic expiration cleanup can only run when the application is opened; it cannot run while the browser/app is closed. Deleted-by metadata is recorded as `Local user` because this version has no authentication system. Do not treat browser-only cleanup as a server-enforced retention guarantee.
+
 ## Run
 
 Open `index.html` in a browser. Tailwind CSS, Chart.js, Lucide, and ExcelJS are loaded from CDNs, so an internet connection is needed for those libraries.
