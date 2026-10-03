@@ -240,15 +240,34 @@
               </div>
             </div>
 
+            <fieldset class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+              <legend class="px-1 text-xs font-medium text-gray-700 dark:text-gray-300">Reading Type</legend>
+              <div class="flex flex-wrap gap-5 text-sm">
+                <label class="inline-flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                  <input type="radio" name="reading-type" id="reading-type-first" value="FIRST" onchange="handleReadingTypeChange()" class="text-emerald-600 focus:ring-emerald-500">
+                  <span>First Reading</span>
+                </label>
+                <label class="inline-flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                  <input type="radio" name="reading-type" id="reading-type-normal" value="NORMAL" onchange="handleReadingTypeChange()" class="text-emerald-600 focus:ring-emerald-500">
+                  <span>Normal Reading</span>
+                </label>
+              </div>
+            </fieldset>
+
             <div id="first-reading-notice" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200" role="status">
               <span class="inline-flex items-center rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold tracking-wider text-amber-900 dark:bg-amber-900 dark:text-amber-100" data-i18n="firstReadingBadge">FIRST READING</span>
-              <p class="mt-1 text-xs" data-i18n="firstReadingNotice">No previous meter reading is available for this customer. This is their initial reading; consumption will be billed after the next reading.</p>
+              <p class="mt-1 text-xs">No previous meter reading is available for this customer.</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label for="input-prev-reading" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="history" aria-hidden="true"></i><span data-i18n="lblPrevReading">Previous Reading</span></label>
                 <input type="number" id="input-prev-reading" step="any" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+              </div>
+              <div id="opening-bill-container" class="hidden">
+                <label for="input-opening-bill" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Opening / Initial Bill Amount (Rs.)</label>
+                <input type="number" id="input-opening-bill" step="any" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" oninput="calculateLivePaymentSummary()">
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Use this amount when the customer already has an existing bill but has no previous meter reading recorded in ElectroPay. It will not be treated as an advance unless the customer pays more than this amount.</p>
               </div>
               <div>
                 <label for="input-curr-reading" class="field-label text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><i data-lucide="gauge" aria-hidden="true"></i><span data-i18n="lblCurrReading">Current Reading</span></label>
@@ -267,12 +286,24 @@
 
               <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block">Reading Type</span>
+                  <span id="live-reading-type" class="font-semibold text-gray-900 dark:text-white">First Reading</span>
+                </div>
+                <div>
                   <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="unitsConsumed">Units Consumed</span>
                   <span id="live-units" class="font-semibold text-gray-900 dark:text-white">0</span>
                 </div>
                 <div>
-                  <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="billCost">Current Bill</span>
+                  <span id="live-cost-label" class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="billCost">Current Bill</span>
                   <span id="live-cost" class="font-semibold text-gray-900 dark:text-white">Rs. 0</span>
+                </div>
+                <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="lblAmountPaid">Amount Paid Now (Rs)</span>
+                  <span id="live-amount-paid" class="font-semibold text-gray-900 dark:text-white">Rs. 0</span>
+                </div>
+                <div>
+                  <span class="text-xs text-gray-500 dark:text-gray-400 block">Remaining Due</span>
+                  <span id="live-due" class="font-semibold text-amber-600 dark:text-amber-400">Rs. 0</span>
                 </div>
                 <div>
                   <span class="text-xs text-gray-500 dark:text-gray-400 block" data-i18n="prevAdvanceApplied">Advance Applied</span>
@@ -686,7 +717,7 @@
                     <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblCurrReading">Current Reading</span><span id="rcpt-curr-reading" class="font-semibold text-slate-900 text-right">0</span></div>
                     <div class="flex justify-between gap-4 rounded-lg bg-white px-3 py-2 border border-slate-100"><span class="font-semibold text-slate-600" data-i18n="unitsConsumed">Units Consumed</span><span id="rcpt-units" class="font-bold text-slate-900 text-right">0</span></div>
                     <div class="flex justify-between gap-4"><span class="text-slate-500" data-i18n="lblRate">Rate per Unit</span><span id="rcpt-rate" class="font-semibold text-slate-900 text-right">Rs. 0</span></div>
-                    <div class="flex justify-between gap-4 border-t border-slate-200 pt-3"><span class="font-bold text-slate-700" data-i18n="billCost">Current Bill</span><span id="rcpt-cost" class="font-bold text-emerald-700 text-right">Rs. 0</span></div>
+                    <div class="flex justify-between gap-4 border-t border-slate-200 pt-3"><span id="rcpt-cost-label" class="font-bold text-slate-700" data-i18n="billCost">Current Bill</span><span id="rcpt-cost" class="font-bold text-emerald-700 text-right">Rs. 0</span></div>
                   </div>
                 </div>
 

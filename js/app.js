@@ -387,7 +387,8 @@
         const units = hasPreviousReading
           ? Math.max(0, Number(rec.currentReading) - previousReading)
           : 0;
-        const billCost = units * rec.rate;
+        const openingBillAmount = hasPreviousReading ? 0 : Math.max(0, Number(rec.openingBillAmount) || 0);
+        const billCost = hasPreviousReading ? units * rec.rate : openingBillAmount;
 
         const prevAdvance = runningAdvance;
         const prevDue = runningDue;
@@ -417,7 +418,9 @@
 
         let status = 'PAID';
         if (newDue > 0) {
-          status = paid > 0 ? 'PARTIAL' : 'DUE';
+          status = !hasPreviousReading && openingBillAmount > 0
+            ? 'DUE'
+            : (paid > 0 ? 'PARTIAL' : 'DUE');
         } else if (newAdvance > 0) {
           status = 'ADVANCE';
         }
@@ -425,6 +428,8 @@
         return {
           ...rec,
           previousReading,
+          readingType: hasPreviousReading ? 'NORMAL' : 'FIRST',
+          openingBillAmount,
           id: rec.id || `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${idx}-${Math.random().toString(16).slice(2)}`}`,
           receiptNo: rec.receiptNo || `${state.settings.receiptPrefix}${String(idx + 1).padStart(6, '0')}`,
           units,
@@ -625,7 +630,7 @@
         tr.innerHTML = `
           <td class="px-5 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
           <td class="px-5 py-3 font-mono text-xs">${r.receiptNo}</td>
-          <td class="px-5 py-3 text-right">${r.units}</td>
+          <td class="px-5 py-3 text-right">${r.previousReading === null || r.previousReading === undefined ? '—' : r.units}</td>
           <td class="px-5 py-3 text-right">Rs. ${r.billCost.toLocaleString()}</td>
           <td class="px-5 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">Rs. ${r.amountPaid.toLocaleString()}</td>
           <td class="px-5 py-3">${getStatusBadge(r.status)}</td>
@@ -659,6 +664,9 @@
     function setupNewPaymentForm(recordToEdit = null) {
       const latest = getLatestLedgerState();
       const record = recordToEdit || (editingRecordId ? state.records.find(r => r.id === editingRecordId) : null);
+      const firstReading = record
+        ? record.previousReading === null || record.previousReading === undefined || record.previousReading === ''
+        : !latest.hasPreviousReading;
 
       if (record) {
         setPaymentFormMode(record.id);
@@ -668,32 +676,61 @@
         document.getElementById('input-date').value = formatNepaliDate().replace(/ BS$/, '');
       }
 
+      document.getElementById('reading-type-first').checked = firstReading;
+      document.getElementById('reading-type-normal').checked = !firstReading;
       const previousInput = document.getElementById('input-prev-reading');
-      const isFirstReading = !record ? !latest.hasPreviousReading : record.previousReading === null || record.previousReading === undefined || record.previousReading === '';
-      previousInput.value = record ? (record.previousReading ?? '') : (latest.hasPreviousReading ? latest.lastReading : '');
-      previousInput.placeholder = isFirstReading
+      previousInput.value = firstReading ? '' : (record ? record.previousReading : latest.lastReading);
+      previousInput.placeholder = firstReading
         ? translations[state.uiPreferences.lang].firstReadingUnavailable
         : '';
-      previousInput.readOnly = isFirstReading;
-      previousInput.required = !isFirstReading;
-      document.getElementById('first-reading-notice').classList.toggle('hidden', !isFirstReading);
+      previousInput.readOnly = firstReading;
+      previousInput.required = !firstReading;
+      document.getElementById('opening-bill-container').classList.toggle('hidden', !firstReading);
+      document.getElementById('first-reading-notice').classList.toggle('hidden', !firstReading);
       document.getElementById('input-curr-reading').value = record ? (record.currentReading ?? '') : (latest.hasPreviousReading ? latest.lastReading : '');
       document.getElementById('input-rate').value = record ? record.rate : state.settings.rate;
+      document.getElementById('input-opening-bill').value = record ? (record.openingBillAmount ?? 0) : 0;
       document.getElementById('input-amount-paid').value = record ? record.amountPaid : 0;
+      calculateLivePaymentSummary();
+    }
+
+    function handleReadingTypeChange() {
+      const firstReading = document.getElementById('reading-type-first').checked;
+      const previousInput = document.getElementById('input-prev-reading');
+      const latest = getLatestLedgerState();
+
+      if (firstReading) {
+        previousInput.value = '';
+        previousInput.readOnly = true;
+        previousInput.required = false;
+        document.getElementById('opening-bill-container').classList.remove('hidden');
+        document.getElementById('first-reading-notice').classList.remove('hidden');
+      } else {
+        if (!previousInput.value && latest.hasPreviousReading) {
+          previousInput.value = latest.lastReading;
+        }
+        previousInput.readOnly = false;
+        previousInput.required = true;
+        document.getElementById('opening-bill-container').classList.add('hidden');
+        document.getElementById('first-reading-notice').classList.add('hidden');
+      }
       calculateLivePaymentSummary();
     }
 
     function calculateLivePaymentSummary() {
       const latest = getLatestLedgerState();
-      const isFirstReading = !latest.hasPreviousReading;
+      const isFirstReading = document.getElementById('reading-type-first').checked;
       const previousInputValue = document.getElementById('input-prev-reading').value;
-      const prevReading = previousInputValue === '' ? null : Number(previousInputValue);
+      const prevReading = isFirstReading || previousInputValue === '' ? null : Number(previousInputValue);
       const currentInputValue = document.getElementById('input-curr-reading').value;
       const currReading = currentInputValue === '' ? 0 : Number(currentInputValue);
       document.getElementById('input-prev-reading').placeholder = isFirstReading
         ? translations[state.uiPreferences.lang].firstReadingUnavailable
         : '';
       const rate = parseFloat(document.getElementById('input-rate').value) || 0;
+      const openingBillAmount = isFirstReading
+        ? Math.max(0, parseFloat(document.getElementById('input-opening-bill').value) || 0)
+        : 0;
       const amountPaid = parseFloat(document.getElementById('input-amount-paid').value) || 0;
 
       const invalidPrevious = !isFirstReading && (prevReading === null || !Number.isFinite(prevReading));
@@ -707,7 +744,7 @@
       const units = isFirstReading || invalidPrevious || decreasingReading
         ? 0
         : Math.max(0, currReading - prevReading);
-      const billCost = units * rate;
+      const billCost = isFirstReading ? openingBillAmount : units * rate;
 
       const prevAdvance = latest.currentAdvance;
       const prevDue = latest.currentDue;
@@ -716,10 +753,17 @@
       const netPayable = (billCost - advanceApplied) + prevDue;
       updatePaymentHelper(prevAdvance, prevDue, billCost, netPayable);
 
-      document.getElementById('live-units').textContent = units;
+      document.getElementById('live-reading-type').textContent = isFirstReading
+        ? translations[state.uiPreferences.lang].readingTypeFirst
+        : translations[state.uiPreferences.lang].readingTypeNormal;
+      document.getElementById('live-units').textContent = isFirstReading ? '—' : units;
+      document.getElementById('live-cost-label').textContent = isFirstReading ? 'Opening Bill' : translations[state.uiPreferences.lang].billCost;
       document.getElementById('live-cost').textContent = `Rs. ${billCost.toLocaleString()}`;
+      document.getElementById('live-amount-paid').textContent = `Rs. ${amountPaid.toLocaleString()}`;
       document.getElementById('live-advance-applied').textContent = `Rs. ${advanceApplied.toLocaleString()}`;
-      document.getElementById('live-net-payable').textContent = `Rs. ${netPayable.toLocaleString()}`;
+      const remainingDue = Math.max(0, netPayable - amountPaid);
+      document.getElementById('live-due').textContent = `Rs. ${remainingDue.toLocaleString()}`;
+      document.getElementById('live-net-payable').textContent = `Rs. ${remainingDue.toLocaleString()}`;
 
       // Explanation banner
       const expl = document.getElementById('advance-explanation');
@@ -734,7 +778,9 @@
       // Live status preview
       let newStatus = 'PAID';
       if (amountPaid < netPayable) {
-        newStatus = amountPaid > 0 ? 'PARTIAL' : 'DUE';
+        newStatus = isFirstReading && openingBillAmount > 0
+          ? 'DUE'
+          : (amountPaid > 0 ? 'PARTIAL' : 'DUE');
       } else if (amountPaid > netPayable || (prevAdvance - advanceApplied) > 0) {
         newStatus = 'ADVANCE';
       }
@@ -789,7 +835,7 @@
     function handleNewPayment(e) {
       e.preventDefault();
       const latest = getLatestLedgerState();
-      const isFirstReading = !latest.hasPreviousReading;
+      const isFirstReading = document.getElementById('reading-type-first').checked;
       const previousInputValue = document.getElementById('input-prev-reading').value;
       const prevReading = isFirstReading
         ? null
@@ -817,11 +863,20 @@
         return;
       }
 
+      const openingBillValue = document.getElementById('input-opening-bill').value;
+      const openingBillAmount = isFirstReading && openingBillValue !== '' ? Number(openingBillValue) : 0;
+      if (!Number.isFinite(openingBillAmount) || openingBillAmount < 0) {
+        showToast("Enter a valid non-negative opening bill amount.", "error");
+        return;
+      }
+
       const recordData = {
         date: paymentDate,
+        readingType: isFirstReading ? 'FIRST' : 'NORMAL',
         paymentMethod: document.getElementById('input-method').value,
         previousReading: prevReading,
         currentReading: currReading,
+        openingBillAmount,
         rate: parseFloat(document.getElementById('input-rate').value),
         amountPaid: parseFloat(document.getElementById('input-amount-paid').value)
       };
@@ -885,7 +940,7 @@
           <td class="px-4 py-3 text-center"></td>
           <td class="px-4 py-3 font-mono text-xs font-bold">${r.receiptNo}</td>
           <td class="px-4 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
-          <td class="px-4 py-3 text-right">${r.units}</td>
+          <td class="px-4 py-3 text-right">${r.previousReading === null || r.previousReading === undefined ? '—' : r.units}</td>
           <td class="px-4 py-3 text-right">Rs. ${r.billCost.toLocaleString()}</td>
           <td class="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">Rs. ${r.amountPaid.toLocaleString()}</td>
           <td class="px-4 py-3 text-right text-amber-600 font-medium">Rs. ${r.newDue.toLocaleString()}</td>
@@ -1201,7 +1256,7 @@
     const EXCEL_BACKUP_STORE = 'handles';
     const EXCEL_RECORD_HEADERS = [
       'Record ID', 'Payment Date (as stored)', 'Internal Date', 'Receipt Number',
-      'Previous Reading', 'Current Reading', 'Units', 'Rate', 'Electricity Cost',
+      'Previous Reading', 'Current Reading', 'Opening Bill Amount', 'Units', 'Rate', 'Electricity Cost',
       'Previous Advance', 'Advance Applied', 'Previous Due', 'Amount Required',
       'Amount Paid', 'Remaining Advance', 'Remaining Due', 'Status',
       'Payment Method', 'Remarks', 'Record Status', 'Last Updated'
@@ -1350,10 +1405,12 @@
         const currentReading = Number(get('Current Reading'));
         const rate = Number(get('Rate'));
         const amountPaid = Number(get('Amount Paid'));
+        const openingBillValue = get('Opening Bill Amount');
+        const openingBillAmount = openingBillValue === '' ? 0 : Number(openingBillValue);
         const date = excelDateValue(get('Payment Date (as stored)'));
-        if (!date || ![currentReading, rate, amountPaid].every(Number.isFinite) ||
+        if (!date || ![currentReading, rate, amountPaid, openingBillAmount].every(Number.isFinite) ||
             (hasPreviousReading && (!Number.isFinite(previousReading) || previousReading < 0 || currentReading < previousReading)) ||
-            currentReading < 0 || rate < 0 || amountPaid < 0) {
+            currentReading < 0 || rate < 0 || amountPaid < 0 || openingBillAmount < 0) {
           throw new Error(`Invalid date, reading, rate, or amount in workbook row ${rowNumber}. The existing workbook was not changed.`);
         }
         const unitsValue = get('Units');
@@ -1363,6 +1420,7 @@
           receiptNo: String(get('Receipt Number') ?? ''),
           previousReading,
           currentReading,
+          openingBillAmount,
           units: unitsValue !== null && unitsValue !== undefined && unitsValue !== ''
             ? Number(unitsValue)
             : (hasPreviousReading ? Math.max(0, currentReading - previousReading) : 0),
@@ -1398,7 +1456,7 @@
 
     function sameExcelRecord(appRecord, excelRecord) {
       const numericFields = [
-        'currentReading', 'units', 'rate', 'billCost',
+        'currentReading', 'openingBillAmount', 'units', 'rate', 'billCost',
         'previousAdvance', 'advanceApplied', 'previousDue', 'netPayable',
         'amountPaid', 'newAdvance', 'newDue'
       ];
@@ -1426,6 +1484,7 @@
           ? null
           : Number(record.previousReading),
         currentReading: Number(record.currentReading),
+        openingBillAmount: Number(record.openingBillAmount) || 0,
         units: Number(record.units),
         rate: Number(record.rate),
         billCost: Number(record.billCost),
@@ -1451,6 +1510,7 @@
         receiptNo: record.receiptNo,
         previousReading: record.previousReading,
         currentReading: record.currentReading,
+        openingBillAmount: record.openingBillAmount || 0,
         rate: record.rate,
         amountPaid: record.amountPaid,
         paymentMethod: record.paymentMethod,
@@ -1519,6 +1579,7 @@
       target.receiptNo = source.receiptNo;
       target.previousReading = source.previousReading;
       target.currentReading = source.currentReading;
+      target.openingBillAmount = source.openingBillAmount || 0;
       target.rate = source.rate;
       target.amountPaid = source.amountPaid;
       target.paymentMethod = source.paymentMethod;
@@ -1545,7 +1606,7 @@
       const recordsSheet = workbook.addWorksheet('Payment Records', { views: [{ state: 'frozen', ySplit: 1 }] });
       const rowValues = allRecords.map(record => [
         record.id, record.date, record.date, record.receiptNo, record.previousReading,
-        record.currentReading, record.units, record.rate, record.billCost,
+        record.currentReading, record.openingBillAmount, record.units, record.rate, record.billCost,
         record.previousAdvance, record.advanceApplied, record.previousDue,
         record.netPayable, record.amountPaid, record.newAdvance, record.newDue,
         record.status, record.paymentMethod, record.remarks, record.recordStatus, record.updatedAt
@@ -1562,6 +1623,7 @@
       recordsSheet.columns = [
         { width: 24 }, { width: 22 }, { width: 16 }, { width: 20 },
         { width: 18, style: { numFmt: '#,##0.00' } }, { width: 18, style: { numFmt: '#,##0.00' } },
+        { width: 20, style: { numFmt: '"Rs. " #,##0.00' } },
         { width: 12, style: { numFmt: '#,##0.00' } }, { width: 14, style: { numFmt: '#,##0.00' } },
         { width: 18, style: { numFmt: '"Rs. " #,##0.00' } }, { width: 18, style: { numFmt: '"Rs. " #,##0.00' } },
         { width: 16, style: { numFmt: '"Rs. " #,##0.00' } }, { width: 16, style: { numFmt: '"Rs. " #,##0.00' } },
@@ -1571,10 +1633,10 @@
       ];
       recordsSheet.getRow(1).height = 30;
       recordsSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      recordsSheet.autoFilter = { from: 'A1', to: `U${Math.max(1, allRecords.length + 1)}` };
+      recordsSheet.autoFilter = { from: 'A1', to: `V${Math.max(1, allRecords.length + 1)}` };
       if (allRecords.length) {
         recordsSheet.addConditionalFormatting({
-          ref: `Q2:Q${allRecords.length + 1}`,
+          ref: `R2:R${allRecords.length + 1}`,
           rules: [
             { type: 'containsText', text: 'PAID', style: { font: { color: { argb: 'FF15803D' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } } } },
             { type: 'containsText', text: 'PARTIAL', style: { font: { color: { argb: 'FFB45309' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEF3C7' } } } },
@@ -1582,7 +1644,7 @@
           ]
         });
         recordsSheet.addConditionalFormatting({
-          ref: `T2:T${allRecords.length + 1}`,
+          ref: `U2:U${allRecords.length + 1}`,
           rules: [
             { type: 'containsText', text: 'DELETED', style: { font: { color: { argb: 'FF6B7280' }, italic: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFF3F4F6' } } } }
           ]
@@ -2027,8 +2089,9 @@
         ? translations[state.uiPreferences.lang].readingTypeFirst
         : translations[state.uiPreferences.lang].readingTypeNormal;
       document.getElementById('rcpt-curr-reading').textContent = rec.currentReading;
-      document.getElementById('rcpt-units').textContent = rec.units;
+      document.getElementById('rcpt-units').textContent = isFirstReading ? '—' : rec.units;
       document.getElementById('rcpt-rate').textContent = `Rs. ${rec.rate}`;
+      document.getElementById('rcpt-cost-label').textContent = isFirstReading ? 'Opening / Initial Bill' : translations[state.uiPreferences.lang].billCost;
       document.getElementById('rcpt-cost').textContent = `Rs. ${rec.billCost.toLocaleString()}`;
 
       document.getElementById('rcpt-prev-advance').textContent = `Rs. ${rec.previousAdvance.toLocaleString()}`;
