@@ -8,6 +8,7 @@
         navMain: "MAIN",
         navDashboard: "Dashboard",
         navNewPayment: "New Payment",
+        navCustomers: "Customers",
         navPaymentRecords: "Payment Records",
         navAnalytics: "Analytics",
         navFinancial: "FINANCIAL",
@@ -26,7 +27,8 @@
         recentPayments: "Recent Payment Records",
         viewAll: "View All",
         tblDate: "Date",
-        tblReceipt: "Receipt #",
+        tblCustomer: "Customer",
+        tblReceipt: "Payment Ref.",
         tblUnits: "Units",
         tblBilled: "Billed Cost",
         tblPaid: "Amount Paid",
@@ -99,7 +101,18 @@
         prevDue: "Previous Outstanding Due",
         newAdvance: "Remaining Advance",
         newDue: "Remaining Due",
-        rcptFooterMsg: "Thank you for your prompt payment. Keep this receipt for future reference."
+        rcptFooterMsg: "Thank you for your prompt payment. Keep this receipt for future reference.",
+        customerDirectory: "Customer Directory",
+        customerDirectoryDesc: "Manage customer identity and optional contact details.",
+        customerName: "Customer Name",
+        customerContact: "Contact Number",
+        customerLocation: "Location",
+        optional: "Optional",
+        addCustomer: "Add Customer",
+        saveCustomer: "Save Customer",
+        cancel: "Cancel",
+        notProvided: "Not provided",
+        editCustomer: "Edit Customer"
       },
       ne: {
         appName: "इलेक्ट्रो-पे",
@@ -107,6 +120,7 @@
         navMain: "मुख्य",
         navDashboard: "ड्यासबोर्ड",
         navNewPayment: "नयाँ भुक्तानी",
+        navCustomers: "ग्राहकहरू",
         navPaymentRecords: "भुक्तानी रेकर्डहरू",
         navAnalytics: "विश्लेषण",
         navFinancial: "वित्तीय",
@@ -125,7 +139,8 @@
         recentPayments: "हालैका भुक्तानी रेकर्डहरू",
         viewAll: "सबै हेर्नुहोस्",
         tblDate: "मिति",
-        tblReceipt: "रसिद नं.",
+        tblCustomer: "ग्राहक",
+        tblReceipt: "भुक्तानी सन्दर्भ",
         tblUnits: "युनिट",
         tblBilled: "बिल रकम",
         tblPaid: "तिरेको रकम",
@@ -198,7 +213,18 @@
         prevDue: "अघिल्लो बाँकी बक्यौता",
         newAdvance: "बाँकी पेश्की मौज्दात",
         newDue: "बाँकी भुक्तानी दायित्व",
-        rcptFooterMsg: "समयमै भुक्तानी गर्नुभएकोमा धन्यवाद।"
+        rcptFooterMsg: "समयमै भुक्तानी गर्नुभएकोमा धन्यवाद।",
+        customerDirectory: "ग्राहक सूची",
+        customerDirectoryDesc: "ग्राहकको पहिचान र वैकल्पिक सम्पर्क विवरण व्यवस्थापन गर्नुहोस्।",
+        customerName: "ग्राहकको नाम",
+        customerContact: "सम्पर्क नम्बर",
+        customerLocation: "स्थान",
+        optional: "वैकल्पिक",
+        addCustomer: "ग्राहक थप्नुहोस्",
+        saveCustomer: "ग्राहक सुरक्षित गर्नुहोस्",
+        cancel: "रद्द गर्नुहोस्",
+        notProvided: "उपलब्ध छैन",
+        editCustomer: "ग्राहक सम्पादन"
       }
     };
 
@@ -219,6 +245,7 @@
         lang: "en",
         theme: "light"
       },
+      customers: [],
       records: [],
       deletedRecordIds: []
     };
@@ -229,6 +256,76 @@
     const selectedPaymentIds = new Set();
     let activeReceiptType = 'single';
     let editingRecordId = null;
+    let activeCustomerId = '';
+    let viewedCustomerId = '';
+
+    function makeId(prefix) {
+      return `${prefix}-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+    }
+
+    function ensureCustomerData() {
+      if (!Array.isArray(state.customers)) state.customers = [];
+      if (!Array.isArray(state.records)) state.records = [];
+      state.records.forEach(record => {
+        if (record.customerId) record.customerId = String(record.customerId);
+      });
+      state.customers = state.customers
+        .filter(customer => customer && typeof customer === 'object')
+        .map(customer => ({
+          ...customer,
+          id: String(customer.id || makeId('CUSTOMER')),
+          customerName: String(customer.customerName ?? ''),
+          contactNumber: String(customer.contactNumber ?? ''),
+          location: String(customer.location ?? '')
+        }));
+
+      const unlinkedRecords = state.records.filter(record => !record.customerId);
+      if (unlinkedRecords.length) {
+        let legacyCustomer = state.customers.find(customer => customer.id === 'legacy-customer');
+        if (!legacyCustomer) {
+          legacyCustomer = {
+            id: 'legacy-customer',
+            customerName: '',
+            contactNumber: '',
+            location: '',
+            createdAt: new Date().toISOString()
+          };
+          state.customers.push(legacyCustomer);
+        }
+        unlinkedRecords.forEach(record => { record.customerId = legacyCustomer.id; });
+      }
+      state.records.forEach(record => {
+        if (record.customerId && !state.customers.some(customer => customer.id === record.customerId)) {
+          state.customers.push({
+            id: String(record.customerId),
+            customerName: '',
+            contactNumber: '',
+            location: ''
+          });
+        }
+      });
+      if (!activeCustomerId || !state.customers.some(customer => customer.id === activeCustomerId)) {
+        activeCustomerId = state.customers[0]?.id || '';
+      }
+    }
+
+    function getCustomer(customerId) {
+      return state.customers.find(customer => customer.id === customerId) || null;
+    }
+
+    function getCustomerForRecord(record) {
+      return getCustomer(record.customerId);
+    }
+
+    function customerDisplayName(customer) {
+      return customer?.customerName?.trim() || 'Name not provided';
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[character]);
+    }
 
     function formatDateForDisplay(dateValue) {
       const rawValue = String(dateValue ?? '').trim();
@@ -330,6 +427,7 @@
        ========================================================================== */
     window.addEventListener('DOMContentLoaded', () => {
       loadStateFromStorage();
+      ensureCustomerData();
       applyThemeUI();
       applyLanguageUI();
       rebuildLedger();
@@ -374,13 +472,15 @@
        4. FINANCIAL LEDGER REBUILD & CALCULATION ENGINE
        ========================================================================== */
     function rebuildLedger() {
+      ensureCustomerData();
       // Sort records chronologically ascending to recalculate carry-overs
       state.records.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      let runningAdvance = 0;
-      let runningDue = 0;
+      const balances = new Map();
 
       state.records = state.records.map((rec, idx) => {
+        const customerId = rec.customerId || state.customers[0]?.id || '';
+        const balance = balances.get(customerId) || { advance: 0, due: 0 };
         const hasPreviousReading = rec.previousReading !== null &&
           rec.previousReading !== undefined && rec.previousReading !== '';
         const previousReading = hasPreviousReading ? Number(rec.previousReading) : null;
@@ -390,8 +490,8 @@
         const openingBillAmount = hasPreviousReading ? 0 : Math.max(0, Number(rec.openingBillAmount) || 0);
         const billCost = hasPreviousReading ? units * rec.rate : openingBillAmount;
 
-        const prevAdvance = runningAdvance;
-        const prevDue = runningDue;
+        const prevAdvance = balance.advance;
+        const prevDue = balance.due;
 
         // Apply previous advance to bill
         const advanceApplied = Math.min(prevAdvance, billCost);
@@ -413,8 +513,7 @@
           newDue = netPayable - paid;
         }
 
-        runningAdvance = newAdvance;
-        runningDue = newDue;
+        balances.set(customerId, { advance: newAdvance, due: newDue });
 
         let status = 'PAID';
         if (newDue > 0) {
@@ -427,6 +526,7 @@
 
         return {
           ...rec,
+          customerId,
           previousReading,
           readingType: hasPreviousReading ? 'NORMAL' : 'FIRST',
           openingBillAmount,
@@ -448,8 +548,11 @@
       refreshActiveViews();
     }
 
-    function getLatestLedgerState() {
-      if (state.records.length === 0) {
+    function getLatestLedgerState(customerId = activeCustomerId) {
+      const customerRecords = customerId
+        ? state.records.filter(record => record.customerId === customerId)
+        : state.records;
+      if (customerRecords.length === 0) {
         return {
           lastReading: null,
           hasPreviousReading: false,
@@ -458,7 +561,7 @@
           lastDate: 'N/A'
         };
       }
-      const last = state.records[state.records.length - 1];
+      const last = customerRecords[customerRecords.length - 1];
       return {
         lastReading: last.currentReading,
         hasPreviousReading: last.currentReading !== null &&
@@ -495,6 +598,7 @@
       const titles = {
         'dashboard': [translations[lang].navDashboard, "Overview of electricity payment metrics"],
         'new-payment': [translations[lang].navNewPayment, "Calculate and log electricity bill"],
+        'customers': [translations[lang].navCustomers, translations[lang].customerDirectoryDesc],
         'records': [translations[lang].navPaymentRecords, "Audit and manage past transactions"],
         'analytics': [translations[lang].navAnalytics, "Visual analysis of consumption and payments"],
         'snapshot': [translations[lang].navAdvancesDue, "Current advance credit and pending balances"],
@@ -505,6 +609,7 @@
       const pageIcons = {
         'dashboard': 'layout-dashboard',
         'new-payment': 'file-plus-2',
+        'customers': 'users',
         'records': 'receipt-text',
         'analytics': 'chart-no-axes-combined',
         'snapshot': 'scale',
@@ -524,6 +629,7 @@
       }
 
       if (tabId === 'new-payment') setupNewPaymentForm();
+      if (tabId === 'customers') renderCustomers();
       if (tabId === 'records') renderRecordsTable();
       if (tabId === 'analytics') renderAnalytics();
       if (tabId === 'snapshot') renderSnapshotView();
@@ -596,6 +702,8 @@
     function refreshActiveViews() {
       renderDashboard();
       renderRecordsTable();
+      renderCustomers();
+      if (viewedCustomerId && getCustomer(viewedCustomerId)) viewCustomer(viewedCustomerId);
       renderSnapshotView();
       if (!document.getElementById('tab-analytics').classList.contains('hidden')) {
         renderAnalytics();
@@ -608,12 +716,17 @@
     function renderDashboard() {
       const totalBilled = state.records.reduce((acc, r) => acc + r.billCost, 0);
       const totalPaid = state.records.reduce((acc, r) => acc + r.amountPaid, 0);
-      const latest = getLatestLedgerState();
+      const balances = state.customers.reduce((totals, customer) => {
+        const latest = getLatestLedgerState(customer.id);
+        totals.due += latest.currentDue;
+        totals.advance += latest.currentAdvance;
+        return totals;
+      }, { due: 0, advance: 0 });
 
       document.getElementById('dash-total-billed').textContent = `Rs. ${totalBilled.toLocaleString()}`;
       document.getElementById('dash-total-paid').textContent = `Rs. ${totalPaid.toLocaleString()}`;
-      document.getElementById('dash-current-due').textContent = `Rs. ${latest.currentDue.toLocaleString()}`;
-      document.getElementById('dash-current-advance').textContent = `Rs. ${latest.currentAdvance.toLocaleString()}`;
+      document.getElementById('dash-current-due').textContent = `Rs. ${balances.due.toLocaleString()}`;
+      document.getElementById('dash-current-advance').textContent = `Rs. ${balances.advance.toLocaleString()}`;
 
       const tbody = document.getElementById('dash-recent-tbody');
       tbody.innerHTML = '';
@@ -625,17 +738,198 @@
       }
 
       recent.forEach(r => {
+        const customer = getCustomerForRecord(r);
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors';
         tr.innerHTML = `
           <td class="px-5 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
-          <td class="px-5 py-3 font-mono text-xs">${r.receiptNo}</td>
+          <td class="px-5 py-3"><span class="font-semibold">${escapeHtml(customerDisplayName(customer))}</span><span class="block text-[10px] font-mono text-gray-400">${escapeHtml(r.receiptNo)}</span></td>
           <td class="px-5 py-3 text-right">${r.previousReading === null || r.previousReading === undefined ? '—' : r.units}</td>
           <td class="px-5 py-3 text-right">Rs. ${r.billCost.toLocaleString()}</td>
           <td class="px-5 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">Rs. ${r.amountPaid.toLocaleString()}</td>
           <td class="px-5 py-3">${getStatusBadge(r.status)}</td>
         `;
         tbody.appendChild(tr);
+      });
+    }
+
+    function renderCustomers() {
+      const tbody = document.getElementById('customers-tbody');
+      if (!tbody) return;
+      const query = (document.getElementById('customers-search')?.value || '').trim().toLocaleLowerCase();
+      const filtered = state.customers.filter(customer =>
+        `${customer.customerName} ${customer.contactNumber} ${customer.location}`.toLocaleLowerCase().includes(query)
+      );
+      tbody.replaceChildren();
+      if (!filtered.length) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="4" class="px-4 py-8 text-center text-xs text-gray-400">${query ? 'No matching customers found.' : 'No customers yet. Add a customer to start recording payments.'}</td>`;
+        tbody.appendChild(row);
+        lucide.createIcons();
+        return;
+      }
+
+      filtered.forEach(customer => {
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors';
+        const name = document.createElement('td');
+        name.className = 'px-4 py-3 font-semibold';
+        name.textContent = customerDisplayName(customer);
+        if (!customer.customerName.trim()) name.classList.add('text-amber-600', 'dark:text-amber-400');
+        const contact = document.createElement('td');
+        contact.className = 'px-4 py-3 text-xs';
+        contact.textContent = customer.contactNumber.trim() || '—';
+        const location = document.createElement('td');
+        location.className = 'px-4 py-3 text-xs';
+        location.textContent = customer.location.trim() || '—';
+        const actions = document.createElement('td');
+        actions.className = 'px-4 py-3 text-center';
+        actions.className += ' whitespace-nowrap';
+        const actionGroup = document.createElement('div');
+        actionGroup.className = 'flex items-center justify-center gap-1';
+        [
+          ['eye', 'View customer', () => viewCustomer(customer.id), 'text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40'],
+          ['pencil', 'Edit customer', () => editCustomer(customer.id), 'text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40'],
+          ['trash-2', 'Delete customer', () => deleteCustomer(customer.id), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40']
+        ].forEach(([icon, label, action, color]) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = `p-1.5 rounded-lg ${color}`;
+          button.title = label;
+          button.setAttribute('aria-label', label);
+          button.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4"></i>`;
+          button.addEventListener('click', action);
+          actionGroup.appendChild(button);
+        });
+        actions.appendChild(actionGroup);
+        row.append(name, contact, location, actions);
+        tbody.appendChild(row);
+      });
+      lucide.createIcons();
+    }
+
+    function saveCustomer(event) {
+      event.preventDefault();
+      const id = document.getElementById('customer-id').value;
+      const customerName = document.getElementById('customer-name').value.trim();
+      if (!customerName) {
+        showToast('Customer name is required.', 'error');
+        return;
+      }
+      const customerData = {
+        customerName,
+        contactNumber: document.getElementById('customer-contact').value.trim(),
+        location: document.getElementById('customer-location').value.trim()
+      };
+      if (id) {
+        const customer = getCustomer(id);
+        if (!customer) {
+          showToast('Customer could not be found. Refresh the customer list and try again.', 'error');
+          return;
+        }
+        Object.assign(customer, customerData, { updatedAt: new Date().toISOString() });
+      } else {
+        const customer = { id: makeId('CUSTOMER'), ...customerData, createdAt: new Date().toISOString() };
+        state.customers.push(customer);
+        activeCustomerId = customer.id;
+      }
+      saveState();
+      resetCustomerForm();
+      renderCustomers();
+      refreshActiveViews();
+      const detailsCustomer = id ? getCustomer(id) : state.customers[state.customers.length - 1];
+      if (detailsCustomer) viewCustomer(detailsCustomer.id);
+      showToast(id ? 'Customer information updated.' : 'Customer added successfully.');
+      if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
+    }
+
+    function editCustomer(id) {
+      const customer = getCustomer(id);
+      if (!customer) return;
+      document.getElementById('customer-id').value = customer.id;
+      document.getElementById('customer-name').value = customer.customerName;
+      document.getElementById('customer-contact').value = customer.contactNumber;
+      document.getElementById('customer-location').value = customer.location;
+      document.getElementById('customer-form-title').querySelector('span').textContent = translations[state.uiPreferences.lang].editCustomer;
+      document.getElementById('customer-save-label').textContent = translations[state.uiPreferences.lang].saveCustomer;
+      document.getElementById('cancel-customer-edit').classList.remove('hidden');
+      document.getElementById('customer-name').focus();
+    }
+
+    function resetCustomerForm() {
+      document.getElementById('customer-form').reset();
+      document.getElementById('customer-id').value = '';
+      document.getElementById('customer-form-title').querySelector('span').textContent = translations[state.uiPreferences.lang].addCustomer;
+      document.getElementById('customer-save-label').textContent = translations[state.uiPreferences.lang].saveCustomer;
+      document.getElementById('cancel-customer-edit').classList.add('hidden');
+    }
+
+    function viewCustomer(id) {
+      const customer = getCustomer(id);
+      if (!customer) return;
+      viewedCustomerId = id;
+      const details = document.getElementById('customer-details');
+      const records = state.records.filter(record => record.customerId === id).slice().reverse();
+      const latest = getLatestLedgerState(id);
+      const optionalFields = [
+        customer.contactNumber.trim() ? `<div><span class="block text-xs text-gray-500 dark:text-gray-400">Contact Number</span><span class="font-medium">${escapeHtml(customer.contactNumber)}</span></div>` : '',
+        customer.location.trim() ? `<div><span class="block text-xs text-gray-500 dark:text-gray-400">Location</span><span class="font-medium">${escapeHtml(customer.location)}</span></div>` : ''
+      ].filter(Boolean).join('');
+      const history = records.length ? records.map(record => `
+        <tr class="border-t border-gray-100 dark:border-gray-700">
+          <td class="px-2 py-2">${escapeHtml(formatDateForDisplay(record.date))}</td>
+          <td class="px-2 py-2 font-mono text-[10px]">${escapeHtml(record.receiptNo)}</td>
+          <td class="px-2 py-2">${escapeHtml(record.paymentMethod || '—')}</td>
+          <td class="px-2 py-2 text-right">Rs. ${Number(record.billCost).toLocaleString()}</td>
+          <td class="px-2 py-2 text-right font-semibold">Rs. ${Number(record.amountPaid).toLocaleString()}</td>
+          <td class="px-2 py-2 text-right">${Number(record.newDue).toLocaleString()}</td>
+        </tr>`).join('')         : '<tr><td colspan="6" class="px-2 py-5 text-center text-xs text-gray-400">No meter readings or payments recorded.</td></tr>';
+      details.innerHTML = `
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0"><p class="text-[10px] uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Customer Information</p>
+            <h3 class="mt-1 text-lg font-bold text-gray-900 dark:text-white break-words">${escapeHtml(customerDisplayName(customer))}</h3></div>
+          <button type="button" data-edit-customer class="shrink-0 p-2 rounded-lg text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40" title="Edit customer"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+          ${optionalFields || '<p class="col-span-2 text-xs text-gray-500 dark:text-gray-400">No optional contact details provided.</p>'}
+          <div><span class="block text-xs text-gray-500 dark:text-gray-400">Current Due</span><span class="font-semibold text-amber-600">Rs. ${latest.currentDue.toLocaleString()}</span></div>
+          <div><span class="block text-xs text-gray-500 dark:text-gray-400">Advance</span><span class="font-semibold text-emerald-600">Rs. ${latest.currentAdvance.toLocaleString()}</span></div>
+          <div><span class="block text-xs text-gray-500 dark:text-gray-400">Last Meter Reading</span><span class="font-medium">${latest.hasPreviousReading ? escapeHtml(latest.lastReading) : '—'}</span></div>
+          <div><span class="block text-xs text-gray-500 dark:text-gray-400">Payments</span><span class="font-medium">${records.length}</span></div>
+        </div>
+        <div class="mt-5 flex items-center justify-between gap-2">
+          <h4 class="font-semibold text-sm text-gray-900 dark:text-white">Meter & Payment History</h4>
+          <button type="button" data-record-payment class="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Record payment</button>
+        </div>
+        <div class="mt-2 overflow-x-auto"><table class="w-full min-w-[460px] text-left text-[11px]">
+          <thead class="text-[10px] uppercase text-gray-500"><tr><th class="px-2 py-2">Date</th><th class="px-2 py-2">Payment Ref.</th><th class="px-2 py-2">Method</th><th class="px-2 py-2 text-right">Billed</th><th class="px-2 py-2 text-right">Paid</th><th class="px-2 py-2 text-right">Due</th></tr></thead>
+          <tbody>${history}</tbody></table></div>`;
+      details.classList.remove('hidden');
+      details.querySelector('[data-edit-customer]').addEventListener('click', () => editCustomer(id));
+      details.querySelector('[data-record-payment]').addEventListener('click', () => {
+        activeCustomerId = id;
+        switchTab('new-payment');
+      });
+      lucide.createIcons();
+    }
+
+    function deleteCustomer(id) {
+      const linkedRecords = state.records.filter(record => record.customerId === id).length;
+      if (linkedRecords) {
+        showToast('This customer has payment history and cannot be deleted. Delete the payment records first if removal is necessary.', 'error');
+        return;
+      }
+      showModal('Delete Customer', 'Delete this customer? This cannot be undone.', () => {
+        state.customers = state.customers.filter(customer => customer.id !== id);
+        if (activeCustomerId === id) activeCustomerId = state.customers[0]?.id || '';
+        if (viewedCustomerId === id) viewedCustomerId = '';
+        document.getElementById('customer-details').classList.add('hidden');
+        if (document.getElementById('customer-id').value === id) resetCustomerForm();
+        saveState();
+        renderCustomers();
+        refreshActiveViews();
+        showToast('Customer deleted.');
+        if (state.settings.autoExcelBackup !== false) void syncExcelBackup(true);
       });
     }
 
@@ -662,8 +956,26 @@
     }
 
     function setupNewPaymentForm(recordToEdit = null) {
-      const latest = getLatestLedgerState();
       const record = recordToEdit || (editingRecordId ? state.records.find(r => r.id === editingRecordId) : null);
+      const customerSelect = document.getElementById('input-customer');
+      const preferredCustomerId = record?.customerId || activeCustomerId || customerSelect.value || state.customers[0]?.id || '';
+      customerSelect.replaceChildren();
+      const prompt = document.createElement('option');
+      prompt.value = '';
+      prompt.textContent = state.customers.length ? 'Select a customer' : 'Add a customer first';
+      prompt.disabled = true;
+      prompt.selected = !preferredCustomerId;
+      customerSelect.appendChild(prompt);
+      state.customers.forEach(customer => {
+        const option = document.createElement('option');
+        option.value = customer.id;
+        option.textContent = customerDisplayName(customer);
+        customerSelect.appendChild(option);
+      });
+      customerSelect.value = preferredCustomerId;
+      customerSelect.disabled = Boolean(record);
+      activeCustomerId = customerSelect.value || '';
+      const latest = getLatestLedgerState(activeCustomerId);
       const firstReading = record
         ? record.previousReading === null || record.previousReading === undefined || record.previousReading === ''
         : !latest.hasPreviousReading;
@@ -675,6 +987,7 @@
         setPaymentFormMode();
         document.getElementById('input-date').value = formatNepaliDate().replace(/ BS$/, '');
       }
+      updatePaymentCustomerSummary();
 
       document.getElementById('reading-type-first').checked = firstReading;
       document.getElementById('reading-type-normal').checked = !firstReading;
@@ -692,6 +1005,40 @@
       document.getElementById('input-opening-bill').value = record ? (record.openingBillAmount ?? 0) : 0;
       document.getElementById('input-amount-paid').value = record ? record.amountPaid : 0;
       calculateLivePaymentSummary();
+    }
+
+    function updatePaymentCustomerSummary() {
+      const summary = document.getElementById('payment-customer-summary');
+      const customer = getCustomer(document.getElementById('input-customer').value);
+      if (!customer) {
+        summary.classList.add('hidden');
+        summary.replaceChildren();
+        return;
+      }
+      const fields = [
+        ['Customer', customerDisplayName(customer)],
+        ...(customer.contactNumber.trim() ? [['Contact', customer.contactNumber]] : []),
+        ...(customer.location.trim() ? [['Location', customer.location]] : [])
+      ];
+      summary.replaceChildren();
+      fields.forEach(([label, value]) => {
+        const item = document.createElement('div');
+        const caption = document.createElement('span');
+        caption.className = 'block text-[10px] uppercase tracking-wide text-emerald-700 dark:text-emerald-300';
+        caption.textContent = label;
+        const content = document.createElement('span');
+        content.className = 'font-semibold text-gray-800 dark:text-gray-100';
+        content.textContent = value;
+        item.append(caption, content);
+        summary.appendChild(item);
+      });
+      summary.classList.remove('hidden');
+    }
+
+    function handlePaymentCustomerChange() {
+      activeCustomerId = document.getElementById('input-customer').value;
+      updatePaymentCustomerSummary();
+      setupNewPaymentForm();
     }
 
     function handleReadingTypeChange() {
@@ -718,7 +1065,7 @@
     }
 
     function calculateLivePaymentSummary() {
-      const latest = getLatestLedgerState();
+      const latest = getLatestLedgerState(document.getElementById('input-customer').value || activeCustomerId);
       const isFirstReading = document.getElementById('reading-type-first').checked;
       const previousInputValue = document.getElementById('input-prev-reading').value;
       const prevReading = isFirstReading || previousInputValue === '' ? null : Number(previousInputValue);
@@ -834,7 +1181,17 @@
 
     function handleNewPayment(e) {
       e.preventDefault();
-      const latest = getLatestLedgerState();
+      const customerId = document.getElementById('input-customer').value;
+      const customer = getCustomer(customerId);
+      if (!customer) {
+        showToast('Select a customer before recording a payment.', 'error');
+        return;
+      }
+      if (!customer.customerName.trim()) {
+        showToast('Add this customer’s name before recording a payment. Use the Customers page to update their information.', 'error');
+        return;
+      }
+      const latest = getLatestLedgerState(customerId);
       const isFirstReading = document.getElementById('reading-type-first').checked;
       const previousInputValue = document.getElementById('input-prev-reading').value;
       const prevReading = isFirstReading
@@ -871,6 +1228,7 @@
       }
 
       const recordData = {
+        customerId,
         date: paymentDate,
         readingType: isFirstReading ? 'FIRST' : 'NORMAL',
         paymentMethod: document.getElementById('input-method').value,
@@ -921,7 +1279,8 @@
         if (!currentRecordIds.has(id)) selectedPaymentIds.delete(id);
       });
       const filtered = state.records.filter(r => {
-        const searchable = `${r.receiptNo} ${r.date} ${formatDateForDisplay(r.date)}`.toLowerCase();
+        const customer = getCustomerForRecord(r);
+        const searchable = `${customer?.customerName || ''} ${customer?.contactNumber || ''} ${customer?.location || ''} ${r.receiptNo} ${r.date} ${formatDateForDisplay(r.date)}`.toLocaleLowerCase();
         return searchable.includes(query);
       });
 
@@ -929,17 +1288,20 @@
       updatePaymentSelectionSummary(filtered);
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-8 text-center text-xs text-gray-400">No payment records found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" class="px-4 py-8 text-center text-xs text-gray-400">No payment records found.</td></tr>`;
         return;
       }
 
       [...filtered].reverse().forEach(r => {
+        const customer = getCustomerForRecord(r);
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors';
         tr.innerHTML = `
           <td class="px-4 py-3 text-center"></td>
-          <td class="px-4 py-3 font-mono text-xs font-bold">${r.receiptNo}</td>
+          <td class="px-4 py-3 font-semibold">${escapeHtml(customerDisplayName(customer))}</td>
+          <td class="px-4 py-3 font-mono text-[10px] font-semibold">${escapeHtml(r.receiptNo)}</td>
           <td class="px-4 py-3 font-medium">${formatDateForDisplay(r.date)}</td>
+          <td class="px-4 py-3 text-xs">${escapeHtml(r.paymentMethod || '—')}</td>
           <td class="px-4 py-3 text-right">${r.previousReading === null || r.previousReading === undefined ? '—' : r.units}</td>
           <td class="px-4 py-3 text-right">Rs. ${r.billCost.toLocaleString()}</td>
           <td class="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">Rs. ${r.amountPaid.toLocaleString()}</td>
@@ -963,7 +1325,7 @@
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = selectedPaymentIds.has(r.id);
-        checkbox.setAttribute('aria-label', `Select payment receipt ${r.receiptNo}`);
+        checkbox.setAttribute('aria-label', `Select payment for ${customerDisplayName(customer)} (${r.receiptNo})`);
         checkbox.className = 'rounded border-gray-300 text-emerald-600 focus:ring-emerald-500';
         checkbox.addEventListener('change', () => togglePaymentSelection(r.id, checkbox.checked));
         tr.cells[0].appendChild(checkbox);
@@ -975,7 +1337,8 @@
     function getFilteredPaymentRecords() {
       const query = document.getElementById('records-search')?.value.toLowerCase() || '';
       return state.records.filter(record => {
-        const searchable = `${record.receiptNo} ${record.date} ${formatDateForDisplay(record.date)}`.toLowerCase();
+        const customer = getCustomerForRecord(record);
+        const searchable = `${customer?.customerName || ''} ${customer?.contactNumber || ''} ${customer?.location || ''} ${record.receiptNo} ${record.date} ${formatDateForDisplay(record.date)}`.toLocaleLowerCase();
         return searchable.includes(query);
       });
     }
@@ -1015,16 +1378,31 @@
     }
 
     function togglePaymentSelection(id, selected) {
-      if (selected) selectedPaymentIds.add(id);
+      if (selected) {
+        const record = state.records.find(item => item.id === id);
+        const selectedCustomerId = state.records.find(item => selectedPaymentIds.has(item.id))?.customerId;
+        if (selectedCustomerId && record?.customerId !== selectedCustomerId) {
+          showToast('Combined receipts can include payments for one customer only.', 'error');
+          renderRecordsTable();
+          return;
+        }
+        selectedPaymentIds.add(id);
+      }
       else selectedPaymentIds.delete(id);
       updatePaymentSelectionSummary();
     }
 
     function toggleSelectAllPayments(select) {
-      getFilteredPaymentRecords().forEach(record => {
-        if (select) selectedPaymentIds.add(record.id);
-        else selectedPaymentIds.delete(record.id);
-      });
+      const filtered = getFilteredPaymentRecords();
+      const filteredCustomerIds = new Set(filtered.map(record => record.customerId));
+      const alreadySelectedCustomerId = state.records.find(record => selectedPaymentIds.has(record.id))?.customerId;
+      if (select && (filteredCustomerIds.size > 1 ||
+          (alreadySelectedCustomerId && [...filteredCustomerIds].some(id => id !== alreadySelectedCustomerId)))) {
+        showToast('Search for one customer before selecting all payments for a combined receipt.', 'error');
+        renderRecordsTable();
+        return;
+      }
+      filtered.forEach(record => select ? selectedPaymentIds.add(record.id) : selectedPaymentIds.delete(record.id));
       renderRecordsTable();
     }
 
@@ -1039,6 +1417,12 @@
         showToast('Select at least one payment record to generate a combined receipt.', 'error');
         return;
       }
+      const customerIds = new Set(selectedRecords.map(record => record.customerId));
+      if (customerIds.size !== 1) {
+        showToast('Select payment records for one customer at a time to create a combined receipt.', 'error');
+        return;
+      }
+      const customer = getCustomerForRecord(selectedRecords[0]);
 
       const rows = document.getElementById('combined-receipt-rows');
       rows.replaceChildren();
@@ -1062,6 +1446,13 @@
       const latest = selectedRecords[selectedRecords.length - 1];
       document.getElementById('combined-receipt-subtitle').textContent =
         `Combined receipt · ${selectedRecords.length} original payment ${selectedRecords.length === 1 ? 'record' : 'records'}`;
+      document.getElementById('combined-receipt-customer').textContent = customerDisplayName(customer);
+      const combinedContactContainer = document.getElementById('combined-receipt-contact-container');
+      combinedContactContainer.classList.toggle('hidden', !customer?.contactNumber.trim());
+      document.getElementById('combined-receipt-contact').textContent = customer?.contactNumber.trim() || '';
+      const combinedLocationContainer = document.getElementById('combined-receipt-location-container');
+      combinedLocationContainer.classList.toggle('hidden', !customer?.location.trim());
+      document.getElementById('combined-receipt-location').textContent = customer?.location.trim() || '';
       document.getElementById('combined-receipt-count').textContent =
         `${selectedRecords.length} ${selectedRecords.length === 1 ? 'payment' : 'payments'}`;
       document.getElementById('combined-receipt-total').textContent = `Rs. ${formatReceiptAmount(total)}`;
@@ -1217,6 +1608,8 @@
        ========================================================================== */
     function renderSnapshotView() {
       const latest = getLatestLedgerState();
+      const customer = getCustomer(activeCustomerId);
+      document.getElementById('snap-customer-name').textContent = customer ? customerDisplayName(customer) : '—';
       document.getElementById('snap-advance').textContent = `Rs. ${latest.currentAdvance.toLocaleString()}`;
       document.getElementById('snap-due').textContent = `Rs. ${latest.currentDue.toLocaleString()}`;
       document.getElementById('snap-last-reading').textContent = latest.hasPreviousReading
@@ -1255,7 +1648,7 @@
     const EXCEL_BACKUP_DB = 'ElectroPayBackupHandles';
     const EXCEL_BACKUP_STORE = 'handles';
     const EXCEL_RECORD_HEADERS = [
-      'Record ID', 'Payment Date (as stored)', 'Internal Date', 'Receipt Number',
+      'Record ID', 'Customer Name', 'Customer ID', 'Payment Date (as stored)', 'Internal Date', 'Receipt Number',
       'Previous Reading', 'Current Reading', 'Opening Bill Amount', 'Units', 'Rate', 'Electricity Cost',
       'Previous Advance', 'Advance Applied', 'Previous Due', 'Amount Required',
       'Amount Paid', 'Remaining Advance', 'Remaining Due', 'Status',
@@ -1416,6 +1809,8 @@
         const unitsValue = get('Units');
         records.push({
           id,
+          customerName: String(get('Customer Name') ?? ''),
+          customerId: String(get('Customer ID') ?? '').trim() || 'legacy-customer',
           date,
           receiptNo: String(get('Receipt Number') ?? ''),
           previousReading,
@@ -1454,6 +1849,32 @@
       return result;
     }
 
+    function validateExcelCustomerSheet(sheet) {
+      if (!sheet) return [];
+      const headers = sheet.getRow(1).values.slice(1).map(value => String(value ?? '').trim());
+      const required = ['Customer ID', 'Customer Name', 'Contact Number', 'Location'];
+      if (required.some(header => !headers.includes(header))) {
+        throw new Error('The Customer Directory sheet does not match the ElectroPay backup format.');
+      }
+      const indexes = Object.fromEntries(headers.map((header, index) => [header, index + 1]));
+      const customers = [];
+      const ids = new Set();
+      for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
+        const row = sheet.getRow(rowNumber);
+        if (row.values.slice(1).every(value => value === null || value === undefined || value === '')) continue;
+        const id = String(row.getCell(indexes['Customer ID']).value ?? '').trim();
+        if (!id || ids.has(id)) throw new Error(`Missing or duplicate customer ID in Customer Directory row ${rowNumber}.`);
+        ids.add(id);
+        customers.push({
+          id,
+          customerName: String(row.getCell(indexes['Customer Name']).value ?? ''),
+          contactNumber: String(row.getCell(indexes['Contact Number']).value ?? ''),
+          location: String(row.getCell(indexes.Location).value ?? '')
+        });
+      }
+      return customers;
+    }
+
     function sameExcelRecord(appRecord, excelRecord) {
       const numericFields = [
         'currentReading', 'openingBillAmount', 'units', 'rate', 'billCost',
@@ -1461,6 +1882,7 @@
         'amountPaid', 'newAdvance', 'newDue'
       ];
       return appRecord.date === excelRecord.date &&
+        String(appRecord.customerId || '') === String(excelRecord.customerId || '') &&
         appRecord.receiptNo === excelRecord.receiptNo &&
         ((appRecord.previousReading === null || appRecord.previousReading === undefined) &&
           (excelRecord.previousReading === null || excelRecord.previousReading === undefined) ||
@@ -1478,6 +1900,8 @@
     function excelRowFromAppRecord(record, recordStatus = 'ACTIVE') {
       return {
         id: record.id,
+        customerName: getCustomerForRecord(record)?.customerName || '',
+        customerId: record.customerId || '',
         date: record.date,
         receiptNo: record.receiptNo,
         previousReading: record.previousReading === null || record.previousReading === undefined
@@ -1506,6 +1930,7 @@
     function appRecordFromExcelRecord(record) {
       return {
         id: record.id,
+        customerId: record.customerId || 'legacy-customer',
         date: record.date,
         receiptNo: record.receiptNo,
         previousReading: record.previousReading,
@@ -1576,6 +2001,7 @@
 
     function applyExcelRecordToApp(target, source) {
       target.date = source.date;
+      target.customerId = source.customerId || 'legacy-customer';
       target.receiptNo = source.receiptNo;
       target.previousReading = source.previousReading;
       target.currentReading = source.currentReading;
@@ -1592,10 +2018,25 @@
     }
 
     function buildExcelBackupWorkbook(workbook, activeRecords, archivedRecords, metadata, syncResult) {
-      ['Payment Records', 'Monthly Summary', 'Statistics', 'Backup Information', 'Calculation Method'].forEach(name => {
+      ['Customer Directory', 'Payment Records', 'Monthly Summary', 'Statistics', 'Backup Information', 'Calculation Method'].forEach(name => {
         const existing = workbook.getWorksheet(name);
         if (existing) workbook.removeWorksheet(existing.id);
       });
+
+      const customersSheet = workbook.addWorksheet('Customer Directory', { views: [{ state: 'frozen', ySplit: 1 }] });
+      const customerRows = state.customers.map(customer => [
+        customer.id, customer.customerName, customer.contactNumber, customer.location
+      ]);
+      customersSheet.addTable({
+        name: 'ElectroPayCustomerDirectory',
+        ref: 'A1',
+        headerRow: true,
+        totalsRow: false,
+        style: { theme: 'TableStyleMedium4', showRowStripes: true },
+        columns: ['Customer ID', 'Customer Name', 'Contact Number', 'Location'].map(name => ({ name })),
+        rows: customerRows
+      });
+      customersSheet.columns = [{ width: 28 }, { width: 32 }, { width: 24 }, { width: 32 }];
 
       const allRecords = [
         ...activeRecords.map(record => excelRowFromAppRecord(record, 'ACTIVE')),
@@ -1605,7 +2046,7 @@
 
       const recordsSheet = workbook.addWorksheet('Payment Records', { views: [{ state: 'frozen', ySplit: 1 }] });
       const rowValues = allRecords.map(record => [
-        record.id, record.date, record.date, record.receiptNo, record.previousReading,
+        record.id, record.customerName || '', record.customerId, record.date, record.date, record.receiptNo, record.previousReading,
         record.currentReading, record.openingBillAmount, record.units, record.rate, record.billCost,
         record.previousAdvance, record.advanceApplied, record.previousDue,
         record.netPayable, record.amountPaid, record.newAdvance, record.newDue,
@@ -1621,7 +2062,7 @@
         rows: rowValues
       });
       recordsSheet.columns = [
-        { width: 24 }, { width: 22 }, { width: 16 }, { width: 20 },
+        { width: 24 }, { width: 32 }, { width: 28 }, { width: 22 }, { width: 16 }, { width: 20 },
         { width: 18, style: { numFmt: '#,##0.00' } }, { width: 18, style: { numFmt: '#,##0.00' } },
         { width: 20, style: { numFmt: '"Rs. " #,##0.00' } },
         { width: 12, style: { numFmt: '#,##0.00' } }, { width: 14, style: { numFmt: '#,##0.00' } },
@@ -1633,10 +2074,10 @@
       ];
       recordsSheet.getRow(1).height = 30;
       recordsSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      recordsSheet.autoFilter = { from: 'A1', to: `V${Math.max(1, allRecords.length + 1)}` };
+      recordsSheet.autoFilter = { from: 'A1', to: `X${Math.max(1, allRecords.length + 1)}` };
       if (allRecords.length) {
         recordsSheet.addConditionalFormatting({
-          ref: `R2:R${allRecords.length + 1}`,
+          ref: `T2:T${allRecords.length + 1}`,
           rules: [
             { type: 'containsText', text: 'PAID', style: { font: { color: { argb: 'FF15803D' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } } } },
             { type: 'containsText', text: 'PARTIAL', style: { font: { color: { argb: 'FFB45309' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEF3C7' } } } },
@@ -1644,7 +2085,7 @@
           ]
         });
         recordsSheet.addConditionalFormatting({
-          ref: `U2:U${allRecords.length + 1}`,
+          ref: `W2:W${allRecords.length + 1}`,
           rules: [
             { type: 'containsText', text: 'DELETED', style: { font: { color: { argb: 'FF6B7280' }, italic: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFF3F4F6' } } } }
           ]
@@ -1654,13 +2095,15 @@
       const monthly = new Map();
       activeRecords.forEach(record => {
         const month = String(record.date).slice(0, 7) || 'Unknown';
-        const current = monthly.get(month) || { count: 0, units: 0, billed: 0, paid: 0, due: 0, advance: 0 };
+        const current = monthly.get(month) || { count: 0, units: 0, billed: 0, paid: 0, balances: new Map() };
         current.count++;
         current.units += Number(record.units);
         current.billed += Number(record.billCost);
         current.paid += Number(record.amountPaid);
-        current.due = Number(record.newDue);
-        current.advance = Number(record.newAdvance);
+        current.balances.set(record.customerId, {
+          due: Number(record.newDue),
+          advance: Number(record.newAdvance)
+        });
         monthly.set(month, current);
       });
       const monthlySheet = workbook.addWorksheet('Monthly Summary', { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -1668,8 +2111,14 @@
         name: 'ElectroPayMonthlySummary', ref: 'A1', headerRow: true, totalsRow: false,
         style: { theme: 'TableStyleMedium4', showRowStripes: true },
         columns: ['Month (as stored by app)', 'Records', 'Units', 'Billed (Rs.)', 'Paid (Rs.)', 'Ending Due (Rs.)', 'Ending Advance (Rs.)'].map(name => ({ name })),
-        rows: [...monthly.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) =>
-          [month, values.count, values.units, values.billed, values.paid, values.due, values.advance])
+        rows: [...monthly.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) => {
+          const endingBalances = [...values.balances.values()].reduce((totals, balance) => {
+            totals.due += balance.due;
+            totals.advance += balance.advance;
+            return totals;
+          }, { due: 0, advance: 0 });
+          return [month, values.count, values.units, values.billed, values.paid, endingBalances.due, endingBalances.advance];
+        })
       });
       monthlySheet.columns = [{ width: 24 }, { width: 12 }, { width: 14 }, { width: 18 }, { width: 18 }, { width: 20 }, { width: 22 }];
       monthlySheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -1677,6 +2126,12 @@
 
       const activeBilled = activeRecords.reduce((sum, record) => sum + Number(record.billCost), 0);
       const activePaid = activeRecords.reduce((sum, record) => sum + Number(record.amountPaid), 0);
+      const currentBalances = state.customers.reduce((totals, customer) => {
+        const latest = getLatestLedgerState(customer.id);
+        totals.due += latest.currentDue;
+        totals.advance += latest.currentAdvance;
+        return totals;
+      }, { due: 0, advance: 0 });
       const statistics = workbook.addWorksheet('Statistics');
       statistics.addRows([
         ['Metric', 'Value'],
@@ -1685,8 +2140,8 @@
         ['Total units consumed', activeRecords.reduce((sum, record) => sum + Number(record.units), 0)],
         ['Total electricity cost (Rs.)', activeBilled],
         ['Total amount paid (Rs.)', activePaid],
-        ['Current due (Rs.)', activeRecords.length ? Number(activeRecords[activeRecords.length - 1].newDue) : 0],
-        ['Current advance (Rs.)', activeRecords.length ? Number(activeRecords[activeRecords.length - 1].newAdvance) : 0]
+        ['Current due (Rs.)', currentBalances.due],
+        ['Current advance (Rs.)', currentBalances.advance]
       ]);
       statistics.columns = [{ width: 34 }, { width: 24 }];
       statistics.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -1816,7 +2271,7 @@
         if (!directory) {
           if (automatic) {
             setExcelBackupStatus('Automatic backup is waiting for a folder. Choose Backup Folder to connect one.', true);
-            showToast('Payment saved, but Excel backup is not connected. Choose a backup folder to enable automatic backups.', 'error');
+            showToast('Changes were saved, but Excel backup is not connected. Choose a backup folder to enable automatic backups.', 'error');
             return;
           }
           await selectExcelBackupFolder();
@@ -1984,6 +2439,7 @@
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(await file.arrayBuffer());
         const rows = validateExcelRecordsSheet(workbook.getWorksheet('Payment Records'));
+        const restoredCustomers = validateExcelCustomerSheet(workbook.getWorksheet('Customer Directory'));
         const duplicateSafeRows = rows.filter(record => record.recordStatus === 'ACTIVE');
         const invalidIds = duplicateSafeRows.filter(record => !record.id);
         if (invalidIds.length) throw new Error('Some active workbook rows do not have a Record ID.');
@@ -2007,11 +2463,14 @@
           try {
             downloadRestoreSnapshot();
             state.records = restoredRecords;
+            state.customers = restoredCustomers;
             state.deletedRecordIds = rows.filter(record => record.recordStatus === 'DELETED').map(record => record.id);
             if (Number.isFinite(restoredRate) && restoredRate >= 0) state.settings.rate = restoredRate;
             state.settings.receiptPrefix = restoredPrefix;
             state.settings.paymentMethods = restoredPaymentMethods;
             rebuildLedger();
+            refreshActiveViews();
+            renderCustomers();
             showToast(`${restoredRecords.length} records restored from Excel.`);
             setExcelBackupStatus(`${restoredRecords.length} records restored from ${file.name}. Choose Backup Now to synchronize the selected workbook.`);
           } catch (error) {
@@ -2061,6 +2520,8 @@
     function confirmResetSystem() {
       showModal("Reset System State", "Are you sure you want to reset all records and settings? This action cannot be undone.", () => {
         state.records = [];
+        state.customers = [];
+        activeCustomerId = '';
         state.settings = { rate: 10, receiptPrefix: "EPR-", paymentMethods: ["Cash", "eSewa", "Khalti", "Bank Transfer"] };
         rebuildLedger();
         showToast("System state reset to defaults.");
@@ -2080,6 +2541,14 @@
       document.getElementById('receipt-card').classList.remove('hidden');
       document.getElementById('receipt-print-label').textContent = 'Print Receipt';
       document.getElementById('rcpt-no').textContent = rec.receiptNo;
+      const customer = getCustomerForRecord(rec);
+      document.getElementById('rcpt-customer-name').textContent = customerDisplayName(customer);
+      const receiptContact = customer?.contactNumber?.trim() || '';
+      document.getElementById('rcpt-contact-container').classList.toggle('hidden', !receiptContact);
+      document.getElementById('rcpt-contact').textContent = receiptContact;
+      const receiptLocation = customer?.location?.trim() || '';
+      document.getElementById('rcpt-location-container').classList.toggle('hidden', !receiptLocation);
+      document.getElementById('rcpt-location').textContent = receiptLocation;
       document.getElementById('rcpt-date').textContent = formatDateForDisplay(rec.date);
       const isFirstReading = rec.previousReading === null || rec.previousReading === undefined || rec.previousReading === '';
       document.getElementById('rcpt-prev-reading').textContent = isFirstReading
