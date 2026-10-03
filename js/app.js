@@ -228,6 +228,7 @@
     let pendingExcelConflicts = null;
     const selectedPaymentIds = new Set();
     let activeReceiptType = 'single';
+    let editingRecordId = null;
 
     function formatDateForDisplay(dateValue) {
       const rawValue = String(dateValue ?? '').trim();
@@ -636,20 +637,49 @@
     /* ==========================================================================
        8. NEW PAYMENT FORM & LIVE RECKONING
        ========================================================================== */
-    function setupNewPaymentForm() {
+    function setPaymentFormMode(recordId = null) {
+      const submitLabel = document.getElementById('payment-submit-label');
+      const cancelButton = document.getElementById('cancel-edit-payment');
+      editingRecordId = recordId;
+
+      if (submitLabel) {
+        submitLabel.textContent = recordId ? 'Update Payment Record' : translations[state.uiPreferences.lang].btnSavePayment;
+      }
+
+      if (cancelButton) {
+        cancelButton.classList.toggle('hidden', !recordId);
+      }
+    }
+
+    function cancelEditPaymentRecord() {
+      setPaymentFormMode();
+      setupNewPaymentForm();
+    }
+
+    function setupNewPaymentForm(recordToEdit = null) {
       const latest = getLatestLedgerState();
-      document.getElementById('input-date').value = formatNepaliDate().replace(/ BS$/, '');
+      const record = recordToEdit || (editingRecordId ? state.records.find(r => r.id === editingRecordId) : null);
+
+      if (record) {
+        setPaymentFormMode(record.id);
+        document.getElementById('input-date').value = formatDateForDisplay(record.date).replace(/ BS$/, '');
+      } else {
+        setPaymentFormMode();
+        document.getElementById('input-date').value = formatNepaliDate().replace(/ BS$/, '');
+      }
+
       const previousInput = document.getElementById('input-prev-reading');
-      previousInput.value = latest.hasPreviousReading ? latest.lastReading : '';
-      previousInput.placeholder = latest.hasPreviousReading
-        ? ''
-        : translations[state.uiPreferences.lang].firstReadingUnavailable;
-      previousInput.readOnly = !latest.hasPreviousReading;
-      previousInput.required = latest.hasPreviousReading;
-      document.getElementById('first-reading-notice').classList.toggle('hidden', latest.hasPreviousReading);
-      document.getElementById('input-curr-reading').value = latest.hasPreviousReading ? latest.lastReading : '';
-      document.getElementById('input-rate').value = state.settings.rate;
-      document.getElementById('input-amount-paid').value = 0;
+      const isFirstReading = !record ? !latest.hasPreviousReading : record.previousReading === null || record.previousReading === undefined || record.previousReading === '';
+      previousInput.value = record ? (record.previousReading ?? '') : (latest.hasPreviousReading ? latest.lastReading : '');
+      previousInput.placeholder = isFirstReading
+        ? translations[state.uiPreferences.lang].firstReadingUnavailable
+        : '';
+      previousInput.readOnly = isFirstReading;
+      previousInput.required = !isFirstReading;
+      document.getElementById('first-reading-notice').classList.toggle('hidden', !isFirstReading);
+      document.getElementById('input-curr-reading').value = record ? (record.currentReading ?? '') : (latest.hasPreviousReading ? latest.lastReading : '');
+      document.getElementById('input-rate').value = record ? record.rate : state.settings.rate;
+      document.getElementById('input-amount-paid').value = record ? record.amountPaid : 0;
       calculateLivePaymentSummary();
     }
 
@@ -787,9 +817,7 @@
         return;
       }
 
-      const newRecord = {
-        id: `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
-        createdAt: new Date().toISOString(),
+      const recordData = {
         date: paymentDate,
         paymentMethod: document.getElementById('input-method').value,
         previousReading: prevReading,
@@ -798,9 +826,27 @@
         amountPaid: parseFloat(document.getElementById('input-amount-paid').value)
       };
 
-      state.records.push(newRecord);
+      if (editingRecordId) {
+        const recordIndex = state.records.findIndex(record => record.id === editingRecordId);
+        if (recordIndex >= 0) {
+          state.records[recordIndex] = {
+            ...state.records[recordIndex],
+            ...recordData,
+            updatedAt: new Date().toISOString()
+          };
+          showToast("Payment record updated successfully!");
+        }
+      } else {
+        state.records.push({
+          id: `ELEC-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
+          createdAt: new Date().toISOString(),
+          ...recordData
+        });
+        showToast("Payment record saved successfully!");
+      }
+
+      setPaymentFormMode();
       rebuildLedger();
-      showToast("Payment record saved successfully!");
       switchTab('records');
       if (state.settings.autoExcelBackup !== false) {
         void syncExcelBackup(true);
@@ -849,6 +895,9 @@
             <div class="flex items-center justify-center gap-2">
               <button onclick="viewReceipt('${r.id}')" class="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-gray-600 dark:text-gray-300" title="View Receipt">
                 <i data-lucide="file-text" class="w-4 h-4"></i>
+              </button>
+              <button onclick="startEditRecord('${r.id}')" class="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-950/50 rounded text-amber-600 dark:text-amber-400" title="Edit Record">
+                <i data-lucide="pencil" class="w-4 h-4"></i>
               </button>
               <button onclick="deleteRecord('${r.id}')" class="p-1.5 hover:bg-red-100 dark:hover:bg-red-950/50 rounded text-red-600 dark:text-red-400" title="Delete Record">
                 <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -974,6 +1023,14 @@
       document.getElementById('receipt-print-label').textContent = 'Print Combined Receipt';
       switchTab('receipt');
       lucide.createIcons();
+    }
+
+    function startEditRecord(id) {
+      const record = state.records.find(item => item.id === id);
+      if (!record) return;
+      setPaymentFormMode(id);
+      setupNewPaymentForm(record);
+      switchTab('new-payment');
     }
 
     function deleteRecord(id) {
