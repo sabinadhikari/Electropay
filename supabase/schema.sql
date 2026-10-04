@@ -352,15 +352,27 @@ begin
          or v_rate <> (v_old->'settings'->>'rate')::double precision then
         raise exception 'Staff payment amounts and readings must be valid and use the configured billing rate.' using errcode = '22023';
       end if;
-      if v_new_record->>'readingType' is distinct from
-           case when v_previous_reading is null then 'FIRST' else 'NORMAL' end
-         or not exists (
-           select 1
-           from jsonb_array_elements(coalesce(v_old->'settings'->'paymentMethods', '[]'::jsonb)) as methods(method)
-           where methods.method #>> '{}' = v_new_record->>'paymentMethod'
-         ) then
-        raise exception 'Staff payments must use a valid reading type and configured payment method.' using errcode = '22023';
-      end if;
+
+      if (
+  v_new_record->>'readingType' is distinct from
+    (
+      case
+        when v_previous_reading is null then 'FIRST'
+        else 'NORMAL'
+      end
+    )
+  or not exists (
+    select 1
+    from jsonb_array_elements(
+      coalesce(v_old->'settings'->'paymentMethods', '[]'::jsonb)
+    ) as methods(method)
+    where methods.method #>> '{}' = v_new_record->>'paymentMethod'
+  )
+) then
+  raise exception
+    'Staff payments must use a valid reading type and configured payment method.'
+    using errcode = '22023';
+end if;
 
       select coalesce(rows.item->>'newAdvance', '0')::double precision,
              coalesce(rows.item->>'newDue', '0')::double precision
