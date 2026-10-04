@@ -279,8 +279,6 @@
     let viewedCustomerId = '';
     let recordsCurrentPage = 1;
     let recordsSearchDebounceTimer = null;
-    let trashConfirmationAction = null;
-    let trashConfirmationInProgress = false;
     const RECORDS_PAGE_SIZE = 25;
 
     function makeId(prefix) {
@@ -574,9 +572,13 @@
         const legacyData = localStorage.getItem(STORAGE_KEY);
         let importedLocalData = false;
         if (legacyData) {
-          const shouldImport = window.confirm(
-            'This ElectroPay workspace has not been initialized. Choose OK to import the existing data saved in this browser. Cancel stops setup and leaves the local ledger unchanged.'
-          );
+          const shouldImport = await window.ElectroPayModal.show({
+            type: 'confirm',
+            title: 'Import Existing Ledger?',
+            message: 'This ElectroPay workspace has not been initialized. Import the data saved in this browser to initialize the shared ledger. Cancel to stop setup and leave the local ledger unchanged.',
+            confirmText: 'Import Local Ledger',
+            cancelText: 'Keep Local Data'
+          });
           if (!shouldImport) {
             throw new Error('Initial setup was canceled. The existing local ledger was left unchanged; sign in again to import it.');
           }
@@ -1169,12 +1171,12 @@
         `Already deleted payments: ${alreadyDeletedPayments}`,
         'The customer and active payments will move to Deleted Records together.'
       ];
-      openTrashConfirmation({
-        title: 'Move Customer to Deleted Records',
+      void openTrashConfirmation({
+        title: 'Delete Customer?',
         description: 'The customer will be hidden from active lists but remain recoverable for one calendar month. Related payment records, readings, and billing calculations are preserved and restored together.',
         details,
-        phrase: 'DELETE',
-        confirmLabel: 'Move to Deleted Records',
+        confirmLabel: 'Move to Trash',
+        type: 'warning',
         onConfirm: () => softDeleteCustomer(id)
       });
     }
@@ -1430,7 +1432,21 @@
 
     async function restoreTrashRecord(type, id) {
       const entry = getTrashEntry(type, id);
-      return entry ? await restoreTrashRecords([entry]) : false;
+      if (!entry || !window.ElectroPayAuth.requireAdmin()) return false;
+      const targets = getTrashRestoreEntries(entry);
+      const confirmed = await window.ElectroPayModal.show({
+        type: 'confirm',
+        title: targets.length > 1 ? 'Restore Records?' : 'Restore Record?',
+        message: targets.length > 1
+          ? `Restore this customer and ${targets.length - 1} related payment records to the active ledger?`
+          : 'Restore this record to the active ElectroPay ledger?',
+        details: targets.slice(0, 8).map(item =>
+          `${item.type}: ${getTrashEntryDisplayName(item)} · ${item.type === 'Payment' ? item.entity.paymentNo || '' : item.entity.customerNo || ''}`
+        ),
+        confirmText: 'Restore',
+        onConfirm: () => restoreTrashRecords([entry])
+      });
+      return confirmed;
     }
 
     function expandPermanentDeleteEntries(entries) {
@@ -1704,7 +1720,20 @@
     }
 
     async function restoreSelectedTrashRecords() {
-      await restoreTrashRecords(getSelectedTrashEntries());
+      const selected = getSelectedTrashEntries();
+      if (!selected.length || !window.ElectroPayAuth.requireAdmin()) return;
+      const restoreEntries = [...new Map(selected.flatMap(entry => getTrashRestoreEntries(entry))
+        .map(entry => [getTrashEntryKey(entry.type, entry.id), entry])).values()];
+      await window.ElectroPayModal.show({
+        type: 'confirm',
+        title: `Restore ${restoreEntries.length} Records?`,
+        message: 'Restore the selected records to the active ElectroPay ledger?',
+        details: restoreEntries.slice(0, 8).map(entry =>
+          `${entry.type}: ${getTrashEntryDisplayName(entry)} · ${entry.type === 'Payment' ? entry.entity.paymentNo || '' : entry.entity.customerNo || ''}`
+        ),
+        confirmText: `Restore ${restoreEntries.length}`,
+        onConfirm: () => restoreTrashRecords(selected)
+      });
       renderDeletedRecords();
     }
 
@@ -1723,12 +1752,13 @@
       const details = targets.length > 10
         ? [`Selected records: ${targets.length}`, ...targets.slice(0, 8).map(describeEntry), `…and ${targets.length - 8} more`]
         : targets.map(describeEntry);
-      openTrashConfirmation({
+      void openTrashConfirmation({
         title: targets.length === 1 ? 'Permanently Delete Record' : `Permanently Delete ${targets.length} Records`,
         description: 'This action permanently removes the selected deleted data from the shared ElectroPay workspace and cannot be undone. Ensure you have a trusted backup if you may need this history again.',
         details,
         phrase,
         confirmLabel: 'Delete Permanently',
+        type: 'danger',
         onConfirm: () => permanentlyDeleteTrashEntries(targets)
       });
     }
@@ -2725,8 +2755,8 @@
       const record = state.records.find(item => item.id === id);
       if (!record || isDeletedRecord(record)) return;
       const customer = getCustomerForRecord(record);
-      openTrashConfirmation({
-        title: 'Move Payment to Deleted Records',
+      void openTrashConfirmation({
+        title: 'Delete Payment?',
         description: 'This financial record affects payment history, receipts, due and advance balances. Moving it to Deleted Records will recalculate active balances. It remains recoverable for one calendar month.',
         details: [
           `Customer: ${customerDisplayName(customer)}`,
@@ -2738,8 +2768,8 @@
           `Status: ${record.status || '—'}`,
           `Billed amount: Rs. ${formatReceiptAmount(record.billCost)}`
         ],
-        phrase: 'DELETE',
-        confirmLabel: 'Move to Deleted Records',
+        confirmLabel: 'Move to Trash',
+        type: 'warning',
         onConfirm: () => softDeletePayment(id)
       });
     }
@@ -3612,7 +3642,7 @@
         if (missingFromApp.length > allowedDifference) {
           const message = `Significant data discrepancy detected. App records: ${appRecords.length}. Active Excel backup records: ${existingActive.length}. Synchronization paused to protect the backup. Restore from Excel or review the records before trying again.`;
           setExcelBackupStatus(message, true);
-          showModal('Backup paused to protect your data', message, null);
+          void showModal('Backup paused to protect your data', message, null);
           return;
         }
 
@@ -3761,7 +3791,14 @@
         const restoredPrefix = String(backupMetadata['Receipt Number Prefix'] || state.settings.receiptPrefix);
 
         const message = `Restore ${restoredRecords.length} active records from "${file.name}"? This replaces the application's current ${state.records.length} records. A downloadable snapshot of the current application data will be created first. Archived DELETED rows will remain in the workbook and will not be restored.`;
-        showModal('Confirm Excel restore', message, async () => {
+        void window.ElectroPayModal.show({
+          type: 'danger',
+          title: 'Restore from Excel?',
+          message,
+          confirmText: 'Restore Records',
+          cancelText: 'Cancel',
+          loadingText: 'Restoring…',
+          onConfirm: async () => {
           const stateBeforeRestore = JSON.parse(JSON.stringify(state));
           try {
             downloadRestoreSnapshot();
@@ -3781,11 +3818,13 @@
             renderCustomers();
             showToast(`${restoredRecords.length} records restored from Excel.`);
             setExcelBackupStatus(`${restoredRecords.length} records restored from ${file.name}. Choose Backup Now to synchronize the selected workbook.`);
+            return true;
           } catch (error) {
             state = stateBeforeRestore;
             await rebuildLedger(false);
             console.error('Excel restore failed:', error);
-            showToast(`Excel restore failed: ${error.message}`, 'error');
+            throw new Error(`Excel restore failed: ${error.message}`);
+          }
           }
         });
       } catch (error) {
@@ -3815,6 +3854,14 @@
         try {
           const imported = JSON.parse(evt.target.result);
           if (imported && Array.isArray(imported.customers) && Array.isArray(imported.records)) {
+            const confirmed = await window.ElectroPayModal.show({
+              type: 'danger',
+              title: 'Restore Application Data?',
+              message: `Restore ${imported.records.length} payment records and ${imported.customers.length} customers from this backup? This replaces the current shared ledger.`,
+              confirmText: 'Restore Data',
+              cancelText: 'Cancel'
+            });
+            if (!confirmed) return;
             const existingSequences = state.numberSequences || {};
             state = { ...state, ...imported };
             state.numberSequences = {
@@ -3839,23 +3886,34 @@
 
     function confirmResetSystem() {
       if (!window.ElectroPayAuth.requireAdmin()) return;
-      showModal("Reset System State", "Are you sure you want to reset all records and settings? This action cannot be undone.", async () => {
-        const stateBeforeReset = JSON.parse(JSON.stringify(state));
-        state.records = [];
-        state.customers = [];
-        state.deletedRecordIds = [];
-        state.trashAudit = [];
-        selectedTrashIds.clear();
-        selectedPaymentIds.clear();
-        activeCustomerId = '';
-        state.settings = { rate: 10, receiptPrefix: "EPR-", paymentMethods: ["Cash", "eSewa", "Khalti", "Bank Transfer"] };
-        if (!await rebuildLedger()) {
-          state = stateBeforeReset;
-          await rebuildLedger(false);
-          return;
+      void window.ElectroPayModal.show({
+        type: 'danger',
+        title: 'Reset Application Data?',
+        message: 'This action permanently removes all ledger records and resets the configured values to their defaults. This cannot be undone.',
+        confirmText: 'Reset Data',
+        cancelText: 'Cancel',
+        requiredText: 'RESET',
+        inputLabel: 'Type RESET to confirm',
+        loadingText: 'Resetting…',
+        onConfirm: async () => {
+          const stateBeforeReset = JSON.parse(JSON.stringify(state));
+          state.records = [];
+          state.customers = [];
+          state.deletedRecordIds = [];
+          state.trashAudit = [];
+          selectedTrashIds.clear();
+          selectedPaymentIds.clear();
+          activeCustomerId = '';
+          state.settings = { rate: 10, receiptPrefix: "EPR-", paymentMethods: ["Cash", "eSewa", "Khalti", "Bank Transfer"] };
+          if (!await rebuildLedger()) {
+            state = stateBeforeReset;
+            await rebuildLedger(false);
+            return false;
+          }
+          showToast("System state reset to defaults.");
+          switchTab('dashboard');
+          return true;
         }
-        showToast("System state reset to defaults.");
-        switchTab('dashboard');
       });
     }
 
@@ -3966,122 +4024,30 @@
     }
 
     function showModal(title, msg, onConfirm) {
-      document.getElementById('modal-title').textContent = title;
-      document.getElementById('modal-msg').textContent = msg;
-      const confirmBtn = document.getElementById('modal-btn-confirm');
-
-      confirmBtn.onclick = () => {
-        closeModal();
-        if (onConfirm) onConfirm();
-      };
-
-      document.getElementById('custom-modal').classList.remove('hidden');
-    }
-
-    let activeTrashConfirmation = null;
-    let trashConfirmationTrigger = null;
-
-    function openTrashConfirmation({ title, description, details, phrase, confirmLabel, onConfirm }) {
-      trashConfirmationTrigger = document.activeElement;
-      activeTrashConfirmation = { phrase, onConfirm, confirmLabel };
-      trashConfirmationInProgress = false;
-      document.getElementById('trash-confirmation-title').textContent = title;
-      document.getElementById('trash-confirmation-description').textContent = description;
-      const detailList = document.getElementById('trash-confirmation-details');
-      detailList.replaceChildren();
-      details.forEach(detail => {
-        const item = document.createElement('li');
-        item.textContent = detail;
-        detailList.appendChild(item);
+      return window.ElectroPayModal.show({
+        type: onConfirm ? 'confirm' : 'info',
+        title,
+        message: msg,
+        confirmText: onConfirm ? 'Continue' : 'Done',
+        onConfirm
       });
-      document.getElementById('trash-confirmation-phrase-label').textContent = `Type exactly: ${phrase}`;
-      const input = document.getElementById('trash-confirmation-phrase');
-      input.value = '';
-      input.placeholder = phrase;
-      const button = document.getElementById('trash-confirmation-submit');
-      button.textContent = confirmLabel;
-      button.disabled = true;
-      document.getElementById('trash-confirmation-modal').classList.remove('hidden');
-      lucide.createIcons();
-      window.setTimeout(() => input.focus(), 0);
     }
 
-    function updateTrashConfirmationButton() {
-      const input = document.getElementById('trash-confirmation-phrase');
-      document.getElementById('trash-confirmation-submit').disabled =
-        !activeTrashConfirmation || input.value !== activeTrashConfirmation.phrase || trashConfirmationInProgress;
-    }
-
-    function handleTrashConfirmationKeydown(event) {
-      if (event.key === 'Enter') event.preventDefault();
-      if (event.key === 'Escape') closeTrashConfirmation();
-      if (event.key === 'Tab') {
-        const focusable = [
-          document.getElementById('trash-confirmation-phrase'),
-          document.getElementById('trash-confirmation-cancel'),
-          ...(!document.getElementById('trash-confirmation-submit').disabled
-            ? [document.getElementById('trash-confirmation-submit')]
-            : [])
-        ];
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    }
-
-    function restoreTrashConfirmationFocus() {
-      const target = trashConfirmationTrigger;
-      trashConfirmationTrigger = null;
-      if (target?.isConnected) target.focus();
-      else document.getElementById('nav-trash').focus();
-    }
-
-    function closeTrashConfirmation() {
-      if (trashConfirmationInProgress) return;
-      document.getElementById('trash-confirmation-modal').classList.add('hidden');
-      document.getElementById('trash-confirmation-phrase').value = '';
-      activeTrashConfirmation = null;
-      restoreTrashConfirmationFocus();
-    }
-
-    async function confirmTrashAction() {
-      if (!activeTrashConfirmation || trashConfirmationInProgress) return;
-      const input = document.getElementById('trash-confirmation-phrase');
-      if (input.value !== activeTrashConfirmation.phrase) return;
-      trashConfirmationInProgress = true;
-      const button = document.getElementById('trash-confirmation-submit');
-      const cancel = document.getElementById('trash-confirmation-cancel');
-      const action = activeTrashConfirmation.onConfirm;
-      button.disabled = true;
-      cancel.disabled = true;
-      button.textContent = 'Processing...';
-      try {
-        const success = await action();
-        if (success) {
-          document.getElementById('trash-confirmation-modal').classList.add('hidden');
-          input.value = '';
-          activeTrashConfirmation = null;
-          restoreTrashConfirmationFocus();
-        }
-      } catch (error) {
-        console.error('Deleted-record action failed:', error);
-        showToast(`Action failed: ${error.message || 'Please try again.'}`, 'error');
-      } finally {
-        trashConfirmationInProgress = false;
-        cancel.disabled = false;
-        if (activeTrashConfirmation) {
-          button.textContent = activeTrashConfirmation.confirmLabel;
-          updateTrashConfirmationButton();
-        }
-      }
+    function openTrashConfirmation({ title, description, details = [], phrase = '', confirmLabel, onConfirm, type = 'danger' }) {
+      return window.ElectroPayModal.show({
+        type,
+        title,
+        message: description,
+        details,
+        requiredText: phrase,
+        inputLabel: `Type exactly: ${phrase}`,
+        confirmText: confirmLabel,
+        cancelText: 'Cancel',
+        loadingText: 'Processing…',
+        onConfirm
+      });
     }
 
     function closeModal() {
-      document.getElementById('custom-modal').classList.add('hidden');
+      window.ElectroPayModal.close();
     }

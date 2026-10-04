@@ -256,25 +256,36 @@
     }
   });
 
-  document.getElementById('logout-button').addEventListener('click', async () => {
-    if (!window.confirm('Are you sure you want to log out?')) return;
-    const button = document.getElementById('logout-button');
-    button.disabled = true;
-    try {
-      if (client && currentUser) {
-        const { error: auditError } = await client.rpc('log_electropay_event', { p_action: 'LOGOUT' });
-        if (auditError) {
-          console.error('Logout audit event could not be recorded:', auditError);
-          window.alert(`Your session will end, but the logout could not be audited: ${auditError.message}`);
+  document.getElementById('logout-button').addEventListener('click', () => {
+    let auditWarningShown = false;
+    void window.ElectroPayModal.show({
+      type: 'confirm',
+      title: 'Log out?',
+      message: 'Are you sure you want to log out of ElectroPay?',
+      confirmText: 'Log Out',
+      cancelText: 'Cancel',
+      loadingText: 'Logging out…',
+      onConfirm: async () => {
+        if (client && currentUser) {
+          if (!auditWarningShown) {
+            const { error: auditError } = await client.rpc('log_electropay_event', { p_action: 'LOGOUT' });
+            if (auditError) {
+              console.error('Logout audit event could not be recorded:', auditError);
+              auditWarningShown = true;
+              window.ElectroPayModal.setFeedback({
+                type: 'warning',
+                message: `Logout could not be audited: ${auditError.message}. Select “Log Out Anyway” to end the session.`,
+                confirmText: 'Log Out Anyway'
+              });
+              return false;
+            }
+          }
+          const { error } = await client.auth.signOut();
+          if (error) throw new Error(`Logout failed: ${error.message}`);
         }
-        const { error } = await client.auth.signOut();
-        if (error) throw error;
+        window.location.reload();
       }
-      window.location.reload();
-    } catch (error) {
-      button.disabled = false;
-      window.alert(`Logout failed: ${error.message}`);
-    }
+    });
   });
 
   window.addEventListener('focus', () => { void refreshActiveProfile(); });

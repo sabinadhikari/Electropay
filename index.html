@@ -1071,39 +1071,6 @@
     </main>
   </div>
 
-  <!-- CUSTOM MODAL CONTAINER -->
-  <div id="trash-confirmation-modal" class="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 hidden" role="dialog" aria-modal="true" aria-labelledby="trash-confirmation-title" aria-describedby="trash-confirmation-description" onkeydown="handleTrashConfirmationKeydown(event)">
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800 shadow-xl max-w-lg w-full p-5 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-      <div class="flex items-start gap-3">
-        <span class="inline-flex w-10 h-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"><i data-lucide="triangle-alert" class="w-5 h-5" aria-hidden="true"></i></span>
-        <div class="min-w-0">
-          <h3 id="trash-confirmation-title" class="text-base font-bold text-gray-900 dark:text-white"></h3>
-          <p id="trash-confirmation-description" class="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"></p>
-        </div>
-      </div>
-      <ul id="trash-confirmation-details" class="space-y-1 rounded-lg bg-gray-50 dark:bg-gray-900/50 p-3 text-xs text-gray-700 dark:text-gray-300"></ul>
-      <div class="space-y-2">
-        <label id="trash-confirmation-phrase-label" for="trash-confirmation-phrase" class="block text-xs font-semibold text-gray-700 dark:text-gray-200"></label>
-        <input id="trash-confirmation-phrase" type="text" autocomplete="off" spellcheck="false" oninput="updateTrashConfirmationButton()" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none">
-      </div>
-      <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
-        <button id="trash-confirmation-cancel" type="button" onclick="closeTrashConfirmation()" class="px-4 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-        <button id="trash-confirmation-submit" type="button" onclick="confirmTrashAction()" disabled class="px-4 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="custom-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 hidden">
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl max-w-md w-full p-6 space-y-4">
-      <h3 id="modal-title" class="text-base font-bold text-gray-900 dark:text-white">Confirm Action</h3>
-      <p id="modal-msg" class="text-xs text-gray-600 dark:text-gray-300">Are you sure you want to perform this operation?</p>
-      <div class="flex justify-end gap-3 pt-2">
-        <button id="modal-btn-cancel" onclick="closeModal()" class="px-4 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
-        <button id="modal-btn-confirm" class="px-4 py-2 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">Confirm</button>
-      </div>
-    </div>
-  </div>
-
   <div id="excel-conflict-modal" class="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 hidden">
     <div class="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800 shadow-xl max-w-2xl w-full p-5 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-start gap-3">
@@ -1125,9 +1092,28 @@
   <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
   </div>
 
+  <div id="electropay-modal" class="ep-modal-backdrop hidden" role="presentation" aria-hidden="true">
+    <section data-modal-panel class="ep-modal-panel" role="dialog" aria-modal="true" aria-labelledby="electropay-modal-title" aria-describedby="electropay-modal-message" tabindex="-1">
+      <div id="electropay-modal-icon" class="ep-modal-icon" aria-hidden="true"></div>
+      <h2 id="electropay-modal-title" class="ep-modal-title"></h2>
+      <p id="electropay-modal-message" class="ep-modal-message"></p>
+      <ul id="electropay-modal-details" class="ep-modal-details hidden"></ul>
+      <div class="ep-modal-input-group">
+        <label id="electropay-modal-input-label" class="ep-modal-input-label hidden" for="electropay-modal-input"></label>
+        <input id="electropay-modal-input" class="ep-modal-input hidden" type="text" autocomplete="off" spellcheck="false" aria-describedby="electropay-modal-error">
+      </div>
+      <p id="electropay-modal-error" class="ep-modal-error hidden" role="alert"></p>
+      <div class="ep-modal-actions">
+        <button id="electropay-modal-cancel" class="ep-modal-button ep-modal-button-secondary" type="button"></button>
+        <button id="electropay-modal-confirm" class="ep-modal-button ep-modal-button-primary" type="button"></button>
+      </div>
+    </section>
+  </div>
+
   <!-- APPLICATION JAVASCRIPT ARCHITECTURE -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./js/supabase-config.js"></script>
+  <script src="./js/modal.js"></script>
   <script src="./js/auth.js"></script>
   <script src="./js/app.js"></script>
 </body>

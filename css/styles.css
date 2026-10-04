@@ -116,6 +116,311 @@
       page-break-inside: avoid;
     }
 
+    .ep-modal-backdrop {
+      position: fixed;
+      z-index: 1000;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-y: auto;
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.58);
+      backdrop-filter: blur(5px);
+      animation: ep-backdrop-in 160ms ease-out;
+    }
+
+    .ep-modal-panel {
+      width: min(100%, 28rem);
+      max-height: min(90vh, 48rem);
+      overflow-y: auto;
+      padding: 1.7rem;
+      border: 1px solid #e2e8f0;
+      border-radius: 18px;
+      background: #fff;
+      color: #172033;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
+      text-align: center;
+      animation: ep-dialog-in 180ms ease-out;
+    }
+
+    html.dark .ep-modal-panel {
+      border-color: #344256;
+      background: #182334;
+      color: #f1f5f9;
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
+    }
+
+    .ep-modal-icon {
+      display: grid;
+      width: 3rem;
+      height: 3rem;
+      margin: 0 auto 1rem;
+      place-items: center;
+      border: 1px solid #c7d2fe;
+      border-radius: 15px;
+      background: #eef2ff;
+      color: #4f46e5;
+    }
+
+    .ep-modal-icon svg {
+      width: 1.45rem;
+      height: 1.45rem;
+      stroke-width: 1.8;
+    }
+
+    #electropay-modal[data-variant="success"] .ep-modal-icon {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+      color: #15803d;
+    }
+
+    #electropay-modal[data-variant="warning"] .ep-modal-icon {
+      border-color: #fde68a;
+      background: #fffbeb;
+      color: #b45309;
+    }
+
+    #electropay-modal[data-variant="error"] .ep-modal-icon,
+    #electropay-modal[data-variant="danger"] .ep-modal-icon {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+
+    html.dark .ep-modal-icon {
+      border-color: #3730a3;
+      background: rgba(49, 46, 129, 0.26);
+      color: #a5b4fc;
+    }
+
+    html.dark #electropay-modal[data-variant="success"] .ep-modal-icon {
+      border-color: #166534;
+      background: rgba(20, 83, 45, 0.24);
+      color: #86efac;
+    }
+
+    html.dark #electropay-modal[data-variant="warning"] .ep-modal-icon {
+      border-color: #854d0e;
+      background: rgba(120, 53, 15, 0.24);
+      color: #fcd34d;
+    }
+
+    html.dark #electropay-modal[data-variant="error"] .ep-modal-icon,
+    html.dark #electropay-modal[data-variant="danger"] .ep-modal-icon {
+      border-color: #7f1d1d;
+      background: rgba(127, 29, 29, 0.25);
+      color: #fca5a5;
+    }
+
+    .ep-modal-title {
+      margin: 0;
+      color: #172033;
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.35;
+    }
+
+    html.dark .ep-modal-title {
+      color: #f8fafc;
+    }
+
+    .ep-modal-message {
+      margin: 0.55rem 0 0;
+      color: #64748b;
+      font-size: 0.88rem;
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+      white-space: pre-line;
+    }
+
+    html.dark .ep-modal-message {
+      color: #b4c0d0;
+    }
+
+    .ep-modal-details {
+      max-height: 9rem;
+      margin: 1rem 0 0;
+      padding: 0.75rem 0.9rem;
+      overflow-y: auto;
+      border: 1px solid #e7ebf2;
+      border-radius: 10px;
+      background: #f8fafc;
+      color: #526076;
+      font-size: 0.75rem;
+      line-height: 1.55;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+
+    .ep-modal-details li + li {
+      margin-top: 0.25rem;
+    }
+
+    html.dark .ep-modal-details {
+      border-color: #334155;
+      background: #121c2b;
+      color: #cbd5e1;
+    }
+
+    .ep-modal-input-group {
+      margin-top: 1rem;
+      text-align: left;
+    }
+
+    .ep-modal-input-label {
+      display: block;
+      margin-bottom: 0.4rem;
+      color: #475569;
+      font-size: 0.75rem;
+      font-weight: 650;
+    }
+
+    html.dark .ep-modal-input-label {
+      color: #cbd5e1;
+    }
+
+    .ep-modal-input {
+      width: 100%;
+      min-height: 42px;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 9px;
+      background: #fff;
+      color: #172033;
+      font: inherit;
+      font-size: 0.85rem;
+    }
+
+    .ep-modal-input:focus {
+      border-color: #818cf8;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+
+    html.dark .ep-modal-input {
+      border-color: #3a495e;
+      background: #121c2b;
+      color: #e2e8f0;
+    }
+
+    .ep-modal-error {
+      margin: 0.75rem 0 0;
+      color: #b91c1c;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      text-align: left;
+    }
+
+    html.dark .ep-modal-error {
+      color: #fca5a5;
+    }
+
+    .ep-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.65rem;
+      margin-top: 1.35rem;
+    }
+
+    .ep-modal-button {
+      min-width: 5.5rem;
+      min-height: 40px;
+      padding: 0.55rem 1rem;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 650;
+      cursor: pointer;
+      transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    }
+
+    .ep-modal-button:focus-visible {
+      outline: 3px solid rgba(99, 102, 241, 0.35);
+      outline-offset: 2px;
+    }
+
+    .ep-modal-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .ep-modal-button-secondary {
+      border-color: #dbe2ec;
+      background: #fff;
+      color: #475569;
+    }
+
+    .ep-modal-button-secondary:hover:not(:disabled) {
+      background: #f8fafc;
+    }
+
+    html.dark .ep-modal-button-secondary {
+      border-color: #3a495e;
+      background: #1e293b;
+      color: #d1d9e5;
+    }
+
+    html.dark .ep-modal-button-secondary:hover:not(:disabled) {
+      background: #273449;
+    }
+
+    .ep-modal-button-primary {
+      background: #4f46e5;
+      color: #fff;
+      box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);
+    }
+
+    .ep-modal-button-primary:hover:not(:disabled) {
+      background: #4338ca;
+      box-shadow: 0 5px 14px rgba(79, 70, 229, 0.2);
+    }
+
+    #electropay-modal[data-variant="danger"] .ep-modal-button-primary,
+    #electropay-modal[data-variant="error"] .ep-modal-button-primary {
+      background: #dc2626;
+      box-shadow: 0 1px 2px rgba(220, 38, 38, 0.18);
+    }
+
+    #electropay-modal[data-variant="danger"] .ep-modal-button-primary:hover:not(:disabled),
+    #electropay-modal[data-variant="error"] .ep-modal-button-primary:hover:not(:disabled) {
+      background: #b91c1c;
+    }
+
+    @keyframes ep-backdrop-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes ep-dialog-in {
+      from { opacity: 0; transform: translateY(7px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @media (max-width: 480px) {
+      .ep-modal-backdrop {
+        align-items: flex-end;
+        padding: 0.65rem;
+      }
+
+      .ep-modal-panel {
+        max-height: min(88vh, 48rem);
+        padding: 1.35rem 1.1rem;
+        border-radius: 18px;
+      }
+
+      .ep-modal-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .ep-modal-actions > :only-child {
+        grid-column: 2;
+      }
+    }
+
     /* ElectroPay interface system */
     @media screen {
       :root {
@@ -725,23 +1030,6 @@
 
       #toast-container > div[class~="bg-red-600"] {
         background: #b91c1c;
-      }
-
-      #custom-modal > div {
-        max-width: min(30rem, calc(100vw - 2rem));
-        border: 1px solid #e2e8f0;
-        border-radius: 16px;
-        box-shadow: 0 24px 70px rgba(15, 23, 42, 0.25);
-        animation: ep-modal-in 180ms ease-out;
-      }
-
-      html.dark #custom-modal > div {
-        border-color: #334155;
-      }
-
-      @keyframes ep-modal-in {
-        from { opacity: 0; transform: translateY(6px) scale(0.99); }
-        to { opacity: 1; transform: translateY(0) scale(1); }
       }
 
       @media (min-width: 768px) and (max-width: 1023px) {
