@@ -68,6 +68,41 @@
       <div class="mt-5 text-center">
         <button id="forgot-password" type="button" class="text-sm font-medium text-emerald-700 hover:underline dark:text-emerald-400">Forgot password?</button>
       </div>
+      <div class="mt-5 text-center text-sm text-gray-600 dark:text-gray-300">
+        <span>Need an account? </span>
+        <button id="show-signup" type="button" class="font-semibold text-emerald-700 hover:underline dark:text-emerald-400">Create an account</button>
+      </div>
+      <form id="register-form" class="hidden space-y-4" novalidate>
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Create your account</h2>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Join ElectroPay with your details below.</p>
+          </div>
+          <button id="back-to-login" type="button" class="text-sm font-medium text-emerald-700 hover:underline dark:text-emerald-400">Back to Login</button>
+        </div>
+        <div>
+          <label for="register-full-name" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Full Name</label>
+          <input id="register-full-name" type="text" autocomplete="name" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white" placeholder="Your full name">
+          <p id="register-full-name-error" class="mt-1 hidden text-xs text-red-600"></p>
+        </div>
+        <div>
+          <label for="register-email" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Email address</label>
+          <input id="register-email" type="email" autocomplete="username" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white" placeholder="you@example.com">
+          <p id="register-email-error" class="mt-1 hidden text-xs text-red-600"></p>
+        </div>
+        <div>
+          <label for="register-password" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Password</label>
+          <input id="register-password" type="password" autocomplete="new-password" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white" placeholder="Create a password">
+          <p id="register-password-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">At least 8 characters</p>
+          <p id="register-password-error" class="mt-1 hidden text-xs text-red-600"></p>
+        </div>
+        <div>
+          <label for="register-password-confirm" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Confirm Password</label>
+          <input id="register-password-confirm" type="password" autocomplete="new-password" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white" placeholder="Re-enter your password">
+          <p id="register-confirm-password-error" class="mt-1 hidden text-xs text-red-600"></p>
+        </div>
+        <button id="register-button" type="submit" class="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70">Create Account</button>
+      </form>
       <form id="password-reset-form" class="hidden space-y-4" novalidate>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a new password</h2>
         <div>
@@ -80,7 +115,6 @@
         </div>
         <button id="reset-password-button" type="submit" class="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70">Update password</button>
       </form>
-      <p class="mt-7 border-t border-gray-100 pt-4 text-center text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:text-gray-400">Access is managed by your ElectroPay administrator. New accounts cannot self-register.</p>
     </div>
   </section>
 

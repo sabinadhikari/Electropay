@@ -1,6 +1,6 @@
 -- Run this file in the Supabase SQL Editor for a new ElectroPay project.
--- Keep public sign-ups disabled. Create invited users in Supabase Auth, then
--- assign their organization and role in public.profiles.
+-- New self-registered accounts are automatically assigned to the default
+-- ElectroPay organization and created as STAFF users by the trigger below.
 
 create extension if not exists pgcrypto;
 
@@ -22,6 +22,36 @@ create table if not exists public.profiles (
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+create or replace function public.handle_new_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.id = '6156f29e-bc99-4238-a33c-f0f8a31187ef'::uuid then
+    return new;
+  end if;
+
+  insert into public.profiles (user_id, organization_id, full_name, role, active)
+  values (
+    new.id,
+    '8d711fa8-aeba-4e25-8e8d-759450822d4f'::uuid,
+    coalesce(new.raw_user_meta_data ->> 'full_name', ''),
+    'STAFF',
+    true
+  )
+  on conflict (user_id) do nothing;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_profile_created on auth.users;
+create trigger on_auth_user_profile_created
+after insert on auth.users
+for each row execute procedure public.handle_new_user_profile();
 
 create table if not exists public.electropay_state (
   organization_id uuid primary key references public.organizations (id),

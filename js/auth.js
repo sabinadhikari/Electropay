@@ -3,6 +3,8 @@
   const loginScreen = document.getElementById('login-screen');
   const loginForm = document.getElementById('login-form');
   const loginButton = document.getElementById('login-button');
+  const registerForm = document.getElementById('register-form');
+  const registerButton = document.getElementById('register-button');
   const loginMessage = document.getElementById('login-message');
   const appShell = document.getElementById('app-shell');
   let client = null;
@@ -24,6 +26,67 @@
     loginButton.textContent = loading ? 'Signing in…' : 'Sign in';
     loginButton.classList.toggle('opacity-70', loading);
     loginButton.classList.toggle('cursor-not-allowed', loading);
+  }
+
+  function setRegisterLoading(loading) {
+    registerButton.disabled = loading;
+    registerButton.textContent = loading ? 'Creating account…' : 'Create Account';
+    registerButton.classList.toggle('opacity-70', loading);
+    registerButton.classList.toggle('cursor-not-allowed', loading);
+  }
+
+  function showRegistrationForm() {
+    loginForm.classList.add('hidden');
+    document.getElementById('forgot-password').classList.add('hidden');
+    document.getElementById('password-reset-form').classList.add('hidden');
+    registerForm.classList.remove('hidden');
+    setMessage('');
+  }
+
+  function showLoginForm(message = '') {
+    registerForm.classList.add('hidden');
+    document.getElementById('password-reset-form').classList.add('hidden');
+    loginForm.classList.remove('hidden');
+    document.getElementById('forgot-password').classList.remove('hidden');
+    setMessage(message, Boolean(message));
+  }
+
+  function validateEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  function validateRegistrationInput({ fullName, email, password, confirmPassword }) {
+    if (!fullName.trim()) return 'Enter your full name.';
+    if (!validateEmail(email)) return 'Enter a valid email address.';
+    if (password.length < 8) return 'Password must be at least 8 characters long.';
+    if (confirmPassword !== password) return 'Passwords do not match.';
+    return '';
+  }
+
+  function setFieldError(fieldId, message, errorId = `${fieldId}-error`) {
+    const field = document.getElementById(fieldId);
+    const errorNode = document.getElementById(errorId);
+    if (field) {
+      field.classList.toggle('border-red-500', Boolean(message));
+      field.classList.toggle('focus:border-red-500', Boolean(message));
+      field.classList.toggle('focus:ring-red-500/20', Boolean(message));
+    }
+    if (errorNode) {
+      errorNode.textContent = message || '';
+      errorNode.classList.toggle('hidden', !message);
+    }
+  }
+
+  function syncRegistrationValidation() {
+    const fullName = document.getElementById('register-full-name').value.trim();
+    const email = document.getElementById('register-email').value.trim();
+    const password = document.getElementById('register-password').value;
+    const confirmPassword = document.getElementById('register-password-confirm').value;
+
+    setFieldError('register-full-name', fullName ? '' : 'Full name is required.', 'register-full-name-error');
+    setFieldError('register-email', email ? (!validateEmail(email) ? 'Enter a valid email address.' : '') : 'Email is required.', 'register-email-error');
+    setFieldError('register-password', password && password.length < 8 ? 'At least 8 characters required.' : '', 'register-password-error');
+    setFieldError('register-password-confirm', confirmPassword && confirmPassword !== password ? 'Passwords do not match.' : '', 'register-confirm-password-error');
   }
 
   async function readProfile(userId) {
@@ -91,6 +154,7 @@
     currentProfile = null;
     appShell.classList.add('hidden');
     loginScreen.classList.remove('hidden');
+    registerForm.classList.add('hidden');
     if (!passwordRecovery) {
       loginForm.classList.remove('hidden');
       document.getElementById('forgot-password').classList.remove('hidden');
@@ -127,6 +191,7 @@
         if (event === 'PASSWORD_RECOVERY') {
           passwordRecovery = true;
           loginForm.classList.add('hidden');
+          registerForm.classList.add('hidden');
           document.getElementById('forgot-password').classList.add('hidden');
           document.getElementById('password-reset-form').classList.remove('hidden');
           setMessage('Choose a new password for your account.');
@@ -187,6 +252,85 @@
     } finally {
       setLoading(false);
     }
+  });
+
+  registerForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setMessage('');
+    setRegisterLoading(true);
+
+    const fullName = document.getElementById('register-full-name').value.trim();
+    const email = document.getElementById('register-email').value.trim();
+    const password = document.getElementById('register-password').value;
+    const confirmPassword = document.getElementById('register-password-confirm').value;
+
+    const validationMessage = validateRegistrationInput({ fullName, email, password, confirmPassword });
+    if (validationMessage) {
+      setMessage(validationMessage, true);
+      setRegisterLoading(false);
+      return;
+    }
+
+    try {
+      if (!client) throw new Error('Supabase is not configured. Reload after configuration.');
+      const { data, error } = await client.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName
+          }
+        }
+      });
+
+      if (error) {
+        const normalizedMessage = error.message || 'We could not create your account.';
+        if (/already|exists|registered|duplicate/i.test(normalizedMessage)) {
+          setMessage('An account with this email already exists. Try signing in instead.', true);
+          return;
+        }
+        setMessage('We could not create your account right now. Please try again.', true);
+        return;
+      }
+
+      if (data.session) {
+        try {
+          await showAuthenticatedApp(data.user, { logLogin: true });
+          return;
+        } catch (profileError) {
+          await client.auth.signOut();
+          setMessage(profileError.message, true);
+          return;
+        }
+      }
+
+      await window.ElectroPayModal.show({
+        type: 'success',
+        title: 'Account Created',
+        message: 'Your ElectroPay account has been created successfully.',
+        details: ['Please verify your email address before signing in.'],
+        confirmText: 'Back to Login',
+        onConfirm: () => showLoginForm('Account created. Check your email to verify before signing in.')
+      });
+      showLoginForm('Account created. Check your email to verify before signing in.');
+    } catch (error) {
+      setMessage('We could not create your account right now. Please try again.', true);
+      console.error('Registration failed:', error);
+    } finally {
+      setRegisterLoading(false);
+    }
+  });
+
+  ['register-full-name', 'register-email', 'register-password', 'register-password-confirm'].forEach((fieldId) => {
+    document.getElementById(fieldId).addEventListener('input', syncRegistrationValidation);
+  });
+
+  document.getElementById('show-signup').addEventListener('click', () => {
+    showRegistrationForm();
+  });
+
+  document.getElementById('back-to-login').addEventListener('click', () => {
+    showLoginForm();
   });
 
   document.getElementById('toggle-password').addEventListener('click', () => {

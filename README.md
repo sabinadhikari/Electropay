@@ -36,9 +36,9 @@ Serve the project from `localhost` or deploy it to an HTTPS static host; do not 
 ElectroPay requires a Supabase project. Until it is configured, the application remains on the login screen and does not load ledger records.
 
 1. Create a Supabase project and run [`supabase/schema.sql`](./supabase/schema.sql) in its SQL Editor.
-2. In Supabase Authentication, disable public sign-ups, enable email/password sign-in, require strong passwords (12 characters or more), configure email/SMTP delivery, and add the development and production HTTPS URLs to the allowed redirect URLs.
+2. In Supabase Authentication, enable email/password sign-in, allow self-service sign-up, configure email/SMTP delivery, and add the development and production HTTPS URLs to the allowed redirect URLs. Keep the Supabase password policy at a minimum of 8 characters to match the app's sign-up validation.
 3. Copy the project's Project URL and publishable/anon key into `url` and `anonKey` in [`js/supabase-config.js`](./js/supabase-config.js). These are browser-public values. Never use a `service_role` key or database password in frontend files.
-4. Create the first user from the Supabase Dashboard (Authentication → Users). Use that user's UUID in the following SQL to assign the initial administrator; replace the UUID and display name:
+4. Create the initial administrator account in Supabase Auth, then use that user's UUID in the following SQL to assign the initial administrator role; replace the UUID and display name:
 
    ```sql
    insert into public.profiles (user_id, organization_id, full_name, role, active)
@@ -51,7 +51,7 @@ ElectroPay requires a Supabase project. Until it is configured, the application 
    );
    ```
 
-5. Create additional users by inviting/creating them in Supabase Auth, then add each user's UUID to `public.profiles` with role `STAFF` or `ADMIN`. Disable access by setting `active = false`. Do not create application passwords or expose the Supabase service-role key. User provisioning and role assignment are intentionally performed in the provider dashboard/SQL Editor; there is no frontend user-management or password-viewing screen.
+5. Self-registering users create their own account with `supabase.auth.signUp()`. The SQL trigger in [`supabase/schema.sql`](./supabase/schema.sql) automatically creates a `public.profiles` row for each new user with `organization_id` set to the ElectroPay org, `role = 'STAFF'`, and `active = true`. Existing administrators are preserved and never demoted. Additional administrator assignments still happen in SQL by updating the profile of an authorized user. Do not create application passwords or expose the Supabase service-role key. There is no frontend user-management or password-viewing screen.
 6. Sign in as the initial administrator. If this browser has an older local ElectroPay ledger, first-time setup offers to import it into the new shared workspace. Confirming the import removes the old browser copy only after the cloud save succeeds. Canceling leaves both setup and the local ledger unchanged. Back up important local data before migration.
 
 The SQL schema stores the existing application state as one revisioned JSON document per organization so existing ledger, receipt, backup, and restore behavior can be preserved. It denies direct client access to the state table: reads and writes go through authenticated database functions, membership is checked against `profiles`, and role checks are enforced in SQL as well as in the interface. `STAFF` can add a payment and manage customer details, but cannot edit/delete existing payments, restore or permanently delete records, restore/import backups, or change system settings. Staff payments must use the configured rate and cannot be backdated before the latest ledger entry. The database rejects stale revisions rather than silently overwriting another user's save.
