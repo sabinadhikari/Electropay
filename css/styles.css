@@ -8,6 +8,15 @@
       position: relative;
     }
 
+    .role-hidden {
+      display: none !important;
+    }
+
+    #app-shell.app-saving {
+      pointer-events: none;
+      cursor: progress;
+    }
+
     .nav-item > svg {
       width: 2rem;
       height: 2rem;

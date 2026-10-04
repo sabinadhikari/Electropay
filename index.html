@@ -37,6 +37,54 @@
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 transition-colors duration-200 antialiased font-sans flex h-screen overflow-hidden">
 
+  <section id="login-screen" class="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-gradient-to-br from-emerald-50 via-white to-slate-100 px-4 py-8 dark:from-gray-950 dark:via-gray-900 dark:to-emerald-950/40">
+    <div class="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-7 shadow-xl dark:border-gray-700 dark:bg-gray-800 sm:p-9">
+      <div class="mb-7 flex items-center justify-center gap-3">
+        <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm"><i data-lucide="zap" class="h-7 w-7" aria-hidden="true"></i></span>
+        <div>
+          <p class="text-xl font-extrabold tracking-wide text-gray-900 dark:text-white">ElectroPay</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Ledger &amp; Billing</p>
+        </div>
+      </div>
+      <div class="mb-6 text-center">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Welcome back</h1>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Sign in to securely access your payment ledger.</p>
+      </div>
+      <form id="login-form" class="space-y-4" novalidate>
+        <div>
+          <label for="login-email" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Email address</label>
+          <input id="login-email" type="email" autocomplete="username" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white" placeholder="you@example.com">
+        </div>
+        <div>
+          <label for="login-password" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Password</label>
+          <div class="relative">
+            <input id="login-password" type="password" autocomplete="current-password" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 pr-12 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white" placeholder="Enter your password">
+            <button id="toggle-password" type="button" aria-label="Show password" class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-emerald-700 dark:text-gray-300"><i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i></button>
+          </div>
+        </div>
+        <p id="login-message" role="status" aria-live="polite" class="hidden rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-gray-700/60"></p>
+        <button id="login-button" type="submit" class="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70">Sign in</button>
+      </form>
+      <div class="mt-5 text-center">
+        <button id="forgot-password" type="button" class="text-sm font-medium text-emerald-700 hover:underline dark:text-emerald-400">Forgot password?</button>
+      </div>
+      <form id="password-reset-form" class="hidden space-y-4" novalidate>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a new password</h2>
+        <div>
+          <label for="reset-password" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">New password</label>
+          <input id="reset-password" type="password" autocomplete="new-password" minlength="12" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+        </div>
+        <div>
+          <label for="reset-password-confirm" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">Confirm new password</label>
+          <input id="reset-password-confirm" type="password" autocomplete="new-password" minlength="12" required class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+        </div>
+        <button id="reset-password-button" type="submit" class="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70">Update password</button>
+      </form>
+      <p class="mt-7 border-t border-gray-100 pt-4 text-center text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:text-gray-400">Access is managed by your ElectroPay administrator. New accounts cannot self-register.</p>
+    </div>
+  </section>
+
+  <div id="app-shell" class="hidden flex h-full w-full">
   <!-- MOBILE OVERLAY -->
   <div id="mobile-overlay" class="fixed inset-0 bg-black/50 z-40 hidden md:hidden" onclick="toggleSidebar(false)"></div>
 
@@ -78,7 +126,7 @@
             <i data-lucide="receipt" class="w-4 h-4"></i>
             <span data-i18n="navPaymentRecords">Payment Records</span>
           </button>
-          <button onclick="switchTab('trash')" id="nav-trash" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+          <button onclick="switchTab('trash')" id="nav-trash" data-admin-only class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
             <i data-lucide="trash" class="w-4 h-4" aria-hidden="true"></i>
             <span data-i18n="navDeletedRecords">Deleted Records</span>
           </button>
@@ -102,11 +150,11 @@
       <div>
         <p class="section-label px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2"><i data-lucide="sliders-horizontal" class="w-3.5 h-3.5" aria-hidden="true"></i><span data-i18n="navSystem">SYSTEM</span></p>
         <div class="space-y-1">
-          <button onclick="switchTab('backup')" id="nav-backup" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+          <button onclick="switchTab('backup')" id="nav-backup" data-admin-only class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
             <i data-lucide="database" class="w-4 h-4"></i>
             <span data-i18n="navBackupRestore">Backup / Restore</span>
           </button>
-          <button onclick="switchTab('settings')" id="nav-settings" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
+          <button onclick="switchTab('settings')" id="nav-settings" data-admin-only class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors">
             <i data-lucide="settings" class="w-4 h-4"></i>
             <span data-i18n="navSettings">Settings</span>
           </button>
@@ -167,6 +215,16 @@
           <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
           <span data-i18n="ledgerSynced">Ledger Synced</span>
         </div>
+        <div class="flex items-center gap-2 border-l border-gray-200 pl-3 dark:border-gray-700">
+          <div class="hidden text-right sm:block">
+            <p id="profile-name" class="max-w-36 truncate text-xs font-semibold text-gray-800 dark:text-gray-100"></p>
+            <p id="profile-email" class="max-w-36 truncate text-[10px] text-gray-500 dark:text-gray-400"></p>
+            <p class="text-[10px] text-gray-500 dark:text-gray-400"><span id="profile-role"></span> · <span id="profile-status"></span></p>
+          </div>
+          <button id="logout-button" type="button" class="rounded-lg border border-gray-300 px-2.5 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Log out">
+            <span class="hidden sm:inline">Log out</span><i data-lucide="log-out" class="h-4 w-4 sm:hidden" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -180,6 +238,7 @@
             <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400 mb-3"><i data-lucide="receipt" class="w-4 h-4" aria-hidden="true"></i></span>
             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" data-i18n="kpiTotalBilled">Total Billed</p>
             <h3 id="dash-total-billed" class="text-2xl font-bold mt-2 text-gray-900 dark:text-white">Rs. 0</h3>
+          </div>
           </div>
           <div class="group bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
             <span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 mb-3"><i data-lucide="badge-check" class="w-4 h-4" aria-hidden="true"></i></span>
@@ -579,7 +638,7 @@
       </section>
 
       <!-- DELETED RECORDS / TRASH TAB -->
-      <section id="tab-trash" class="tab-content hidden space-y-4">
+      <section id="tab-trash" data-admin-only class="tab-content hidden space-y-4">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div class="p-4 sm:p-5 border-b border-gray-200 dark:border-gray-700 space-y-4">
             <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -742,7 +801,7 @@
       </section>
 
       <!-- BACKUP / RESTORE TAB -->
-      <section id="tab-backup" class="tab-content hidden max-w-3xl mx-auto space-y-6">
+      <section id="tab-backup" data-admin-only class="tab-content hidden max-w-3xl mx-auto space-y-6">
         <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-6">
           <h3 class="section-label text-base font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-3"><span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400"><i data-lucide="database" class="w-4 h-4" aria-hidden="true"></i></span><span data-i18n="backupTitle">Excel Backup & System Restore</span></h3>
 
@@ -823,7 +882,7 @@
       </section>
 
       <!-- SETTINGS TAB -->
-      <section id="tab-settings" class="tab-content hidden max-w-2xl mx-auto space-y-6">
+      <section id="tab-settings" data-admin-only class="tab-content hidden max-w-2xl mx-auto space-y-6">
         <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-6">
           <h3 class="section-label text-base font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-3"><span class="inline-flex w-9 h-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-400"><i data-lucide="settings-2" class="w-4 h-4" aria-hidden="true"></i></span><span data-i18n="settingsTitle">System Configuration</span></h3>
 
@@ -1065,8 +1124,12 @@
 
   <!-- TOAST CONTAINER -->
   <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+  </div>
 
   <!-- APPLICATION JAVASCRIPT ARCHITECTURE -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./js/supabase-config.js"></script>
+  <script src="./js/auth.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

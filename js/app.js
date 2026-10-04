@@ -244,6 +244,9 @@
        2. SINGLE AUTHORITATIVE APP STATE
        ========================================================================== */
     const STORAGE_KEY = 'ELECTROPAY_AUTHORITATIVE_STATE_V2';
+    let stateRevision = 0;
+    let stateSaveQueue = Promise.resolve();
+    let pendingStateSaves = 0;
 
     let state = {
       version: "2.0",
@@ -500,56 +503,154 @@
     /* ==========================================================================
        3. INITIALIZATION & PERSISTENCE LIFECYCLE
        ========================================================================== */
-    window.addEventListener('DOMContentLoaded', () => {
-      loadStateFromStorage();
-      ensureCustomerData();
-      cleanupExpiredTrash();
-      applyThemeUI();
-      applyLanguageUI();
-      rebuildLedger();
-      switchTab('dashboard');
-      lucide.createIcons();
-      updateHeaderNepaliDateTime();
-      window.setInterval(updateHeaderNepaliDateTime, 1000);
-      void updateExcelBackupLocationStatus();
-
-      // Register print cleanup event listener
-      window.onafterprint = () => {
-        document.body.classList.remove('printing-receipt');
-        document.body.classList.remove('printing-combined-receipt');
-      };
+    let authenticatedAppStarted = false;
+    document.addEventListener('electropay:authenticated', () => {
+      void startAuthenticatedApp();
+    });
+    document.addEventListener('electropay:role-changed', () => {
+      applyRoleAccess();
+      if (!window.ElectroPayAuth.isAdmin() &&
+          ['trash', 'backup', 'settings'].includes(
+            Array.from(document.querySelectorAll('.tab-content'))
+              .find(section => !section.classList.contains('hidden'))?.id?.replace('tab-', '')
+          )) {
+        switchTab('dashboard');
+      }
+    });
+    window.addEventListener('DOMContentLoaded', async () => {
+      const authenticated = await window.ElectroPayAuth.initialize();
+      if (authenticated) await startAuthenticatedApp();
     });
 
-    function loadStateFromStorage() {
+    async function startAuthenticatedApp() {
+      if (authenticatedAppStarted) return;
+      authenticatedAppStarted = true;
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          state = { ...state, ...parsed };
-          state.settings = { ...state.settings, ...(parsed.settings || {}) };
-          state.uiPreferences = { ...state.uiPreferences, ...(parsed.uiPreferences || {}) };
-          state.settings.autoExcelBackup = parsed.settings?.autoExcelBackup !== false;
-          state.deletedRecordIds = Array.isArray(parsed.deletedRecordIds) ? parsed.deletedRecordIds : [];
+        await loadStateFromStorage();
+        const loadedState = JSON.stringify(state);
+        ensureCustomerData();
+        applyThemeUI();
+        applyLanguageUI();
+        await rebuildLedger(false);
+        if (JSON.stringify(state) !== loadedState) {
+          if (!window.ElectroPayAuth.isAdmin()) {
+            throw new Error('An administrator must review and normalize this ledger before staff can use it.');
+          }
+          if (!await saveState()) throw new Error('The ledger could not be normalized and saved.');
         }
-      } catch (err) {
-        console.error("Failed loading state:", err);
+        if (window.ElectroPayAuth.isAdmin()) await cleanupExpiredTrash();
+        applyRoleAccess();
+        switchTab('dashboard');
+        lucide.createIcons();
+        updateHeaderNepaliDateTime();
+        window.setInterval(updateHeaderNepaliDateTime, 1000);
+        void updateExcelBackupLocationStatus();
+        window.ElectroPayAuth.showWorkspace();
+
+        window.onafterprint = () => {
+          document.body.classList.remove('printing-receipt');
+          document.body.classList.remove('printing-combined-receipt');
+        };
+      } catch (error) {
+        console.error('ElectroPay could not load protected data:', error);
+        authenticatedAppStarted = false;
+        window.ElectroPayAuth.showLogin(`ElectroPay could not load its protected data: ${error.message}`);
       }
     }
 
-    function saveState() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    async function loadStateFromStorage() {
+      const { data, error } = await window.ElectroPayAuth.client.rpc('get_electropay_state');
+      if (error) throw error;
+      if (!data || !data.state || !Number.isInteger(Number(data.revision))) {
+        throw new Error('Supabase returned an invalid ElectroPay state.');
+      }
+
+      stateRevision = Number(data.revision);
+      if (!data.initialized) {
+        if (!window.ElectroPayAuth.isAdmin()) {
+          throw new Error('An administrator must initialize ElectroPay before staff can use it.');
+        }
+        let initialState = { ...state };
+        const legacyData = localStorage.getItem(STORAGE_KEY);
+        let importedLocalData = false;
+        if (legacyData) {
+          const shouldImport = window.confirm(
+            'This ElectroPay workspace has not been initialized. Choose OK to import the existing data saved in this browser. Cancel stops setup and leaves the local ledger unchanged.'
+          );
+          if (!shouldImport) {
+            throw new Error('Initial setup was canceled. The existing local ledger was left unchanged; sign in again to import it.');
+          }
+          if (shouldImport) {
+            const parsed = JSON.parse(legacyData);
+            if (!parsed || !Array.isArray(parsed.customers) || !Array.isArray(parsed.records)) {
+              throw new Error('The browser contains an invalid legacy ledger. Export or repair it before migration.');
+            }
+            initialState = {
+              ...initialState,
+              ...parsed,
+              settings: { ...initialState.settings, ...(parsed.settings || {}) },
+              uiPreferences: { ...initialState.uiPreferences, ...(parsed.uiPreferences || {}) }
+            };
+            importedLocalData = true;
+          }
+        }
+        state = initialState;
+        ensureCustomerData();
+        await rebuildLedger(false);
+        if (!await saveState()) throw new Error('Initial ledger setup could not be saved to Supabase.');
+        if (importedLocalData) localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      state = {
+        ...state,
+        ...data.state,
+        settings: { ...state.settings, ...(data.state.settings || {}) },
+        uiPreferences: { ...state.uiPreferences, ...(data.state.uiPreferences || {}) },
+        deletedRecordIds: Array.isArray(data.state.deletedRecordIds) ? data.state.deletedRecordIds : []
+      };
+    }
+
+    async function saveState() {
+      const snapshot = JSON.parse(JSON.stringify(state));
+      const operation = stateSaveQueue.then(async () => {
+        const { data, error } = await window.ElectroPayAuth.client.rpc('save_electropay_state', {
+          p_state: snapshot,
+          p_expected_revision: stateRevision
+        });
+        if (error) throw error;
+        stateRevision = Number(data.revision);
         return true;
-      } catch (err) {
-        console.error("Failed saving state:", err);
+      });
+      stateSaveQueue = operation.catch(() => undefined);
+      pendingStateSaves += 1;
+      const appShell = document.getElementById('app-shell');
+      appShell.classList.add('app-saving');
+      appShell.setAttribute('aria-busy', 'true');
+      try {
+        return await operation;
+      } catch (error) {
+        console.error('Failed saving protected ElectroPay data:', error);
+        if (error.code === '40001') {
+          showToast('Another user changed the ledger. This unsaved change was discarded; reloading the latest data.', 'error');
+          window.setTimeout(() => window.location.reload(), 700);
+        } else {
+          showToast(`Your change was not saved to the server. ${error.message}`, 'error');
+        }
         return false;
+      } finally {
+        pendingStateSaves -= 1;
+        if (pendingStateSaves === 0) {
+          appShell.classList.remove('app-saving');
+          appShell.removeAttribute('aria-busy');
+        }
       }
     }
 
     /* ==========================================================================
        4. FINANCIAL LEDGER REBUILD & CALCULATION ENGINE
        ========================================================================== */
-    function rebuildLedger() {
+    async function rebuildLedger(persist = true) {
       ensureCustomerData();
       // Sort records chronologically ascending to recalculate carry-overs
       state.records.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -623,7 +724,7 @@
         };
       });
 
-      const saved = saveState();
+      const saved = persist ? await saveState() : true;
       refreshActiveViews();
       return saved;
     }
@@ -656,6 +757,12 @@
        5. UI TAB ROUTING & NAVIGATION
        ========================================================================== */
     function switchTab(tabId) {
+      const adminTabs = new Set(['trash', 'backup', 'settings']);
+      if (adminTabs.has(tabId) && !window.ElectroPayAuth.isAdmin()) {
+        showToast('This page requires an administrator role.', 'error');
+        return;
+      }
+
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.querySelectorAll('.nav-item').forEach(el => {
         el.classList.remove('bg-emerald-50', 'dark:bg-emerald-950/50', 'text-emerald-600', 'dark:text-emerald-400');
@@ -737,12 +844,35 @@
       }
     }
 
+    function applyRoleAccess() {
+      const isAdmin = window.ElectroPayAuth.isAdmin();
+      document.querySelectorAll('[data-admin-only]').forEach(element => {
+        element.classList.toggle('role-hidden', !isAdmin);
+      });
+      const paymentForm = document.getElementById('payment-form');
+      if (paymentForm) {
+        const submitButton = document.getElementById('payment-submit-button');
+        submitButton?.classList.toggle('hidden', !isAdmin && Boolean(editingRecordId));
+      }
+      const paymentRate = document.getElementById('input-rate');
+      if (paymentRate) paymentRate.readOnly = !isAdmin;
+    }
+
+    function currentActorLabel() {
+      const profile = window.ElectroPayAuth.profile;
+      return profile?.full_name?.trim() || window.ElectroPayAuth.user?.email || 'Authenticated user';
+    }
+
     /* ==========================================================================
        6. THEME & I18N TOGGLES
        ========================================================================== */
-    function toggleTheme() {
+    async function toggleTheme() {
+      const previousTheme = state.uiPreferences.theme;
       state.uiPreferences.theme = state.uiPreferences.theme === 'light' ? 'dark' : 'light';
-      saveState();
+      if (!await saveState()) {
+        state.uiPreferences.theme = previousTheme;
+        return;
+      }
       applyThemeUI();
       if (!document.getElementById('tab-analytics').classList.contains('hidden')) {
         renderAnalytics();
@@ -760,9 +890,13 @@
       }
     }
 
-    function toggleLanguage() {
+    async function toggleLanguage() {
+      const previousLanguage = state.uiPreferences.lang;
       state.uiPreferences.lang = state.uiPreferences.lang === 'en' ? 'ne' : 'en';
-      saveState();
+      if (!await saveState()) {
+        state.uiPreferences.lang = previousLanguage;
+        return;
+      }
       applyLanguageUI();
       refreshActiveViews();
     }
@@ -882,7 +1016,9 @@
         [
           ['eye', 'View customer', () => viewCustomer(customer.id), 'text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40'],
           ['pencil', 'Edit customer', () => editCustomer(customer.id), 'text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40'],
-          ['trash-2', 'Delete customer', () => deleteCustomer(customer.id), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40']
+          ...(window.ElectroPayAuth.isAdmin()
+            ? [['trash-2', 'Delete customer', () => deleteCustomer(customer.id), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40']]
+            : [])
         ].forEach(([icon, label, action, color]) => {
           const button = document.createElement('button');
           button.type = 'button';
@@ -900,8 +1036,10 @@
       lucide.createIcons();
     }
 
-    function saveCustomer(event) {
+    async function saveCustomer(event) {
       event.preventDefault();
+      const previousState = JSON.parse(JSON.stringify(state));
+      const previousActiveCustomerId = activeCustomerId;
       const id = document.getElementById('customer-id').value;
       const customerName = document.getElementById('customer-name').value.trim();
       if (!customerName) {
@@ -926,7 +1064,12 @@
         ensureStableRecordNumbers();
         activeCustomerId = customer.id;
       }
-      saveState();
+      if (!await saveState()) {
+        state = previousState;
+        activeCustomerId = previousActiveCustomerId;
+        refreshActiveViews();
+        return;
+      }
       resetCustomerForm();
       renderCustomers();
       refreshActiveViews();
@@ -1011,6 +1154,7 @@
     }
 
     function deleteCustomer(id) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const customer = getCustomer(id);
       if (!customer || isDeletedRecord(customer)) return;
       const linkedRecords = getActivePaymentRecords().filter(record => record.customerId === id);
@@ -1039,6 +1183,10 @@
        8. NEW PAYMENT FORM & LIVE RECKONING
        ========================================================================== */
     function setPaymentFormMode(recordId = null) {
+      if (recordId && !window.ElectroPayAuth.isAdmin()) {
+        window.ElectroPayAuth.requireAdmin();
+        return;
+      }
       const submitLabel = document.getElementById('payment-submit-label');
       const cancelButton = document.getElementById('cancel-edit-payment');
       editingRecordId = recordId;
@@ -1100,28 +1248,29 @@
     function pushTrashAudit(action, type, entity, timestamp = new Date().toISOString()) {
       state.trashAudit.push({
         action,
+        actionBy: currentActorLabel(),
         recordType: type,
         recordId: String(entity.id),
         recordNumber: String(type === 'Payment' ? entity.paymentNo || '' : entity.customerNo || ''),
         reference: String(entity.receiptNo || entity.id),
         deletedAt: entity.deletedAt || '',
-        deletedBy: entity.deletedBy || 'Local user',
+        deletedBy: entity.deletedBy || currentActorLabel(),
         permanentDeletionAt: entity.permanentDeletionAt || '',
         occurredAt: timestamp
       });
     }
 
-    function persistTrashMutation(rollback, failureMessage) {
+    async function persistTrashMutation(rollback, failureMessage) {
       let saved = false;
       try {
-        saved = rebuildLedger();
+        saved = await rebuildLedger();
       } catch (error) {
         console.error('Failed applying deleted-record change:', error);
       }
       if (saved) return true;
       rollback();
       try {
-        rebuildLedger();
+        await rebuildLedger(false);
       } catch (error) {
         console.error('Failed restoring state after deleted-record change failed:', error);
       }
@@ -1129,7 +1278,8 @@
       return false;
     }
 
-    function softDeletePayment(id, reason = '') {
+    async function softDeletePayment(id, reason = '') {
+      if (!window.ElectroPayAuth.requireAdmin()) return false;
       const record = state.records.find(item => item.id === id);
       if (!record || isDeletedRecord(record)) return false;
       const recordsBefore = state.records.map(item => ({ ...item }));
@@ -1141,14 +1291,14 @@
       Object.assign(record, {
         isDeleted: true,
         deletedAt,
-        deletedBy: 'Local user',
+        deletedBy: currentActorLabel(),
         deletionReason: reason.trim(),
         permanentDeletionAt: addCalendarMonth(deletedAt),
         deletionGroupId: groupId
       });
       pushTrashAudit('soft-deleted', 'Payment', record, deletedAt);
       if (!state.deletedRecordIds.includes(id)) state.deletedRecordIds.push(id);
-      const saved = persistTrashMutation(() => {
+      const saved = await persistTrashMutation(() => {
         state.records = recordsBefore;
         state.deletedRecordIds = deletedIdsBefore;
         state.trashAudit = auditBefore;
@@ -1162,7 +1312,8 @@
       return true;
     }
 
-    function softDeleteCustomer(id, reason = '') {
+    async function softDeleteCustomer(id, reason = '') {
+      if (!window.ElectroPayAuth.requireAdmin()) return false;
       const customer = getCustomer(id);
       if (!customer || isDeletedRecord(customer)) return false;
       const customersBefore = state.customers.map(item => ({ ...item }));
@@ -1178,7 +1329,7 @@
       Object.assign(customer, {
         isDeleted: true,
         deletedAt,
-        deletedBy: 'Local user',
+        deletedBy: currentActorLabel(),
         deletionReason: reason.trim(),
         permanentDeletionAt,
         deletionGroupId: groupId
@@ -1189,7 +1340,7 @@
         Object.assign(record, {
           isDeleted: true,
           deletedAt,
-          deletedBy: 'Local user',
+          deletedBy: currentActorLabel(),
           deletionReason: reason.trim(),
           permanentDeletionAt,
           deletionGroupId: groupId
@@ -1202,7 +1353,7 @@
         viewedCustomerId = '';
         document.getElementById('customer-details').classList.add('hidden');
       }
-      const saved = persistTrashMutation(() => {
+      const saved = await persistTrashMutation(() => {
         state.customers = customersBefore;
         state.records = recordsBefore;
         state.deletedRecordIds = deletedIdsBefore;
@@ -1240,7 +1391,8 @@
       return [...new Map(entries.map(candidate => [getTrashEntryKey(candidate.type, candidate.id), candidate])).values()];
     }
 
-    function restoreTrashRecords(entries) {
+    async function restoreTrashRecords(entries) {
+      if (!window.ElectroPayAuth.requireAdmin()) return false;
       const restoreEntries = [...new Map(entries.flatMap(entry => getTrashRestoreEntries(entry))
         .map(entry => [getTrashEntryKey(entry.type, entry.id), entry])).values()];
       if (!restoreEntries.length) return false;
@@ -1256,13 +1408,13 @@
         candidate.entity.deletedBy = null;
         candidate.entity.permanentDeletionAt = null;
         candidate.entity.restoredAt = restoredAt;
-        candidate.entity.restoredBy = 'Local user';
+        candidate.entity.restoredBy = currentActorLabel();
         candidate.entity.deletionGroupId = null;
         if (candidate.type === 'Payment') {
           state.deletedRecordIds = state.deletedRecordIds.filter(recordId => recordId !== candidate.id);
         }
       });
-      const saved = persistTrashMutation(() => {
+      const saved = await persistTrashMutation(() => {
         state.customers = customersBefore;
         state.records = recordsBefore;
         state.deletedRecordIds = deletedIdsBefore;
@@ -1276,9 +1428,9 @@
       return true;
     }
 
-    function restoreTrashRecord(type, id) {
+    async function restoreTrashRecord(type, id) {
       const entry = getTrashEntry(type, id);
-      return entry ? restoreTrashRecords([entry]) : false;
+      return entry ? await restoreTrashRecords([entry]) : false;
     }
 
     function expandPermanentDeleteEntries(entries) {
@@ -1291,7 +1443,8 @@
       return [...new Map(expanded.map(entry => [getTrashEntryKey(entry.type, entry.id), entry])).values()];
     }
 
-    function permanentlyDeleteTrashEntries(entries) {
+    async function permanentlyDeleteTrashEntries(entries) {
+      if (!window.ElectroPayAuth.requireAdmin()) return false;
       const targets = expandPermanentDeleteEntries(entries);
       if (!targets.length) return false;
       const customersBefore = state.customers.map(item => ({ ...item }));
@@ -1312,7 +1465,7 @@
           selectedPaymentIds.delete(entry.id);
         }
       });
-      const saved = persistTrashMutation(() => {
+      const saved = await persistTrashMutation(() => {
         state.customers = customersBefore;
         state.records = recordsBefore;
         state.deletedRecordIds = deletedIdsBefore;
@@ -1329,7 +1482,8 @@
       return true;
     }
 
-    function cleanupExpiredTrash() {
+    async function cleanupExpiredTrash() {
+      if (!window.ElectroPayAuth.requireAdmin()) return 0;
       const now = Date.now();
       const entries = getTrashEntries();
       const expiredCustomerGroups = new Set(entries
@@ -1356,7 +1510,7 @@
           if (!state.deletedRecordIds.includes(entry.id)) state.deletedRecordIds.push(entry.id);
         }
       });
-      if (!saveState()) {
+      if (!await saveState()) {
         state.trashAudit = auditBefore;
         state.records = recordsBefore;
         state.customers = customersBefore;
@@ -1368,7 +1522,6 @@
     }
 
     function renderDeletedRecords() {
-      cleanupExpiredTrash();
       const tbody = document.getElementById('trash-tbody');
       if (!tbody) return;
       const entries = getTrashEntries();
@@ -1550,8 +1703,8 @@
       return getTrashEntries().filter(entry => selectedTrashIds.has(getTrashEntryKey(entry.type, entry.id)));
     }
 
-    function restoreSelectedTrashRecords() {
-      restoreTrashRecords(getSelectedTrashEntries());
+    async function restoreSelectedTrashRecords() {
+      await restoreTrashRecords(getSelectedTrashEntries());
       renderDeletedRecords();
     }
 
@@ -1561,6 +1714,7 @@
     }
 
     function confirmPermanentDelete(entries) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const targets = expandPermanentDeleteEntries(entries);
       const phrase = targets.length === 1 ? 'PERMANENT DELETE' : `PERMANENT DELETE ${targets.length}`;
       const describeEntry = entry => entry.type === 'Payment'
@@ -1571,7 +1725,7 @@
         : targets.map(describeEntry);
       openTrashConfirmation({
         title: targets.length === 1 ? 'Permanently Delete Record' : `Permanently Delete ${targets.length} Records`,
-        description: 'This action permanently removes the selected deleted data from this browser and cannot be undone. Ensure you have a trusted backup if you may need this history again.',
+        description: 'This action permanently removes the selected deleted data from the shared ElectroPay workspace and cannot be undone. Ensure you have a trusted backup if you may need this history again.',
         details,
         phrase,
         confirmLabel: 'Delete Permanently',
@@ -1827,6 +1981,7 @@
 
       try {
         await new Promise(resolve => setTimeout(resolve, 0));
+        if (editingRecordId && !window.ElectroPayAuth.requireAdmin()) return;
         const customerId = document.getElementById('input-customer').value;
         const customer = getCustomer(customerId);
         if (!customer) {
@@ -1844,6 +1999,15 @@
           : (previousInputValue === '' ? null : Number(previousInputValue));
         const currReading = parseFloat(document.getElementById('input-curr-reading').value);
         const paymentDate = convertNepaliDateToISO(document.getElementById('input-date').value);
+        if (!window.ElectroPayAuth.isAdmin()) {
+          const latestDate = state.records
+            .filter(record => !isDeletedRecord(record))
+            .reduce((latest, record) => record.date > latest ? record.date : latest, '');
+          if (latestDate && paymentDate < latestDate) {
+            showToast('Staff can only add payments dated on or after the latest ledger entry. Ask an administrator to correct older entries.', 'error');
+            return;
+          }
+        }
 
         if (!Number.isFinite(currReading) || currReading < 0) {
           showToast("Enter a valid non-negative current meter reading.", "error");
@@ -1883,7 +2047,7 @@
           rate: parseFloat(document.getElementById('input-rate').value),
           amountPaid: parseFloat(document.getElementById('input-amount-paid').value)
         };
-        const recordsBeforeSave = state.records.map(record => ({ ...record }));
+        const stateBeforeSave = JSON.parse(JSON.stringify(state));
         const wasEditing = Boolean(editingRecordId);
 
         if (wasEditing) {
@@ -1905,14 +2069,14 @@
 
         let saved = false;
         try {
-          saved = rebuildLedger();
+          saved = await rebuildLedger();
         } catch (error) {
           console.error('Failed rebuilding the payment ledger:', error);
         }
         if (!saved) {
-          state.records = recordsBeforeSave;
+          state = stateBeforeSave;
           try {
-            rebuildLedger();
+            await rebuildLedger(false);
           } catch (error) {
             console.error('Failed restoring the payment ledger after an unsuccessful save:', error);
           }
@@ -2395,12 +2559,13 @@
               <button onclick="viewReceipt('${r.id}')" class="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-gray-600 dark:text-gray-300" title="View Receipt">
                 <i data-lucide="file-text" class="w-4 h-4"></i>
               </button>
-              <button onclick="startEditRecord('${r.id}')" class="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-950/50 rounded text-amber-600 dark:text-amber-400" title="Edit Record">
-                <i data-lucide="pencil" class="w-4 h-4"></i>
-              </button>
-              <button onclick="deleteRecord('${r.id}')" class="p-1.5 hover:bg-red-100 dark:hover:bg-red-950/50 rounded text-red-600 dark:text-red-400" title="Delete Record">
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
-              </button>
+              ${window.ElectroPayAuth.isAdmin() ? `
+                <button onclick="startEditRecord('${r.id}')" class="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-950/50 rounded text-amber-600 dark:text-amber-400" title="Edit Record">
+                  <i data-lucide="pencil" class="w-4 h-4"></i>
+                </button>
+                <button onclick="deleteRecord('${r.id}')" class="p-1.5 hover:bg-red-100 dark:hover:bg-red-950/50 rounded text-red-600 dark:text-red-400" title="Delete Record">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>` : ''}
             </div>
           </td>
         `;
@@ -2547,6 +2712,7 @@
     }
 
     function startEditRecord(id) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const record = state.records.find(item => item.id === id);
       if (!record || isDeletedRecord(record)) return;
       setPaymentFormMode(id);
@@ -2555,6 +2721,7 @@
     }
 
     function deleteRecord(id) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const record = state.records.find(item => item.id === id);
       if (!record || isDeletedRecord(record)) return;
       const customer = getCustomerForRecord(record);
@@ -2713,16 +2880,23 @@
       document.getElementById('setting-prefix').value = state.settings.receiptPrefix;
     }
 
-    function saveSettings(e) {
+    async function saveSettings(e) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       e.preventDefault();
+      const previousState = JSON.parse(JSON.stringify(state));
       state.settings.rate = parseFloat(document.getElementById('setting-rate').value) || 10;
       state.settings.receiptPrefix = document.getElementById('setting-prefix').value || "EPR-";
-      saveState();
+      if (!await saveState()) {
+        state = previousState;
+        loadSettingsForm();
+        return;
+      }
       showToast("Configuration saved successfully.");
       refreshActiveViews();
     }
 
     function exportDataJSON() {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -2730,7 +2904,18 @@
       a.download = `ElectroPay_Backup_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
+      void logAuditEvent('BACKUP_CREATED');
       showToast("Backup file downloaded.");
+    }
+
+    async function logAuditEvent(action) {
+      const { error } = await window.ElectroPayAuth.client.rpc('log_electropay_event', { p_action: action });
+      if (error) {
+        console.error(`Could not record ${action} audit event:`, error);
+        showToast(`The operation completed, but its audit event could not be recorded: ${error.message}`, 'error');
+        return false;
+      }
+      return true;
     }
 
     const EXCEL_BACKUP_FILE = 'Electricity_Payment_Backup.xlsx';
@@ -2819,6 +3004,7 @@
     }
 
     async function selectExcelBackupFolder() {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       if (!window.showDirectoryPicker) {
         showToast('Folder access is not available in this browser. Open the app from localhost in Chrome or Edge.', 'error');
         return;
@@ -2847,9 +3033,15 @@
       status.classList.toggle('dark:text-emerald-200', !isError);
     }
 
-    function setExcelAutoBackup(enabled) {
+    async function setExcelAutoBackup(enabled) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
+      const previous = state.settings.autoExcelBackup;
       state.settings.autoExcelBackup = enabled;
-      saveState();
+      if (!await saveState()) {
+        state.settings.autoExcelBackup = previous;
+        document.getElementById('excel-auto-backup').checked = previous !== false;
+        return;
+      }
       showToast(enabled ? 'Automatic Excel backup enabled.' : 'Automatic Excel backup disabled.');
     }
 
@@ -3334,6 +3526,10 @@
     }
 
     async function syncExcelBackup(automatic = false) {
+      if (!window.ElectroPayAuth.isAdmin()) {
+        if (!automatic) window.ElectroPayAuth.requireAdmin();
+        return false;
+      }
       if (automatic && state.settings.autoExcelBackup === false) return;
       if (!automatic) {
         try {
@@ -3481,7 +3677,7 @@
           if (!previous) added++;
           else if (!sameExcelRecord(record, previous) || previous.recordStatus === 'DELETED') updated++;
         }
-        rebuildLedger();
+        if (!await rebuildLedger()) throw new Error('Workbook data could not be saved to Supabase.');
         const activeRecordsForBackup = getActivePaymentRecords();
         const activeRows = activeRecordsForBackup.map(record => excelRowFromAppRecord(record, 'ACTIVE'));
         const activeIds = new Set(activeRows.map(record => record.id));
@@ -3507,7 +3703,8 @@
         const message = `Backup completed: ${added} new, ${updated} updated, ${deleted} archived, ${restored} recovered from Excel. ${verifiedTotal} total records verified. Last backup: ${completedAt}.`;
         setExcelBackupStatus(message);
         if (!automatic) showToast(`Excel backup completed. ${verifiedTotal} records verified.`);
-        saveState();
+        if (!await saveState()) throw new Error('Backup status could not be saved to Supabase.');
+        await logAuditEvent('BACKUP_CREATED');
       } catch (error) {
         console.error('Excel backup synchronization failed:', error);
         if (isNewWorkbook && directory) {
@@ -3519,7 +3716,7 @@
         }
         if (stateBeforeSync) {
           state = stateBeforeSync;
-          saveState();
+          await saveState();
           refreshActiveViews();
         }
         const message = `Backup failed. The master Excel workbook was not reported as updated: ${error.message}`;
@@ -3531,6 +3728,7 @@
     }
 
     async function restoreFromExcel(event) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const file = event.target.files?.[0];
       event.target.value = '';
       if (!file) return;
@@ -3563,7 +3761,8 @@
         const restoredPrefix = String(backupMetadata['Receipt Number Prefix'] || state.settings.receiptPrefix);
 
         const message = `Restore ${restoredRecords.length} active records from "${file.name}"? This replaces the application's current ${state.records.length} records. A downloadable snapshot of the current application data will be created first. Archived DELETED rows will remain in the workbook and will not be restored.`;
-        showModal('Confirm Excel restore', message, () => {
+        showModal('Confirm Excel restore', message, async () => {
+          const stateBeforeRestore = JSON.parse(JSON.stringify(state));
           try {
             downloadRestoreSnapshot();
             state.records = restoredRecords;
@@ -3576,12 +3775,15 @@
             if (Number.isFinite(restoredRate) && restoredRate >= 0) state.settings.rate = restoredRate;
             state.settings.receiptPrefix = restoredPrefix;
             state.settings.paymentMethods = restoredPaymentMethods;
-            rebuildLedger();
+            if (!await rebuildLedger()) throw new Error('Restored records could not be saved to Supabase.');
+            await logAuditEvent('BACKUP_RESTORED');
             refreshActiveViews();
             renderCustomers();
             showToast(`${restoredRecords.length} records restored from Excel.`);
             setExcelBackupStatus(`${restoredRecords.length} records restored from ${file.name}. Choose Backup Now to synchronize the selected workbook.`);
           } catch (error) {
+            state = stateBeforeRestore;
+            await rebuildLedger(false);
             console.error('Excel restore failed:', error);
             showToast(`Excel restore failed: ${error.message}`, 'error');
           }
@@ -3603,35 +3805,42 @@
     }
 
     function importDataJSON(e) {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
       const file = e.target.files[0];
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
+        const stateBeforeImport = JSON.parse(JSON.stringify(state));
         try {
           const imported = JSON.parse(evt.target.result);
-          if (imported && Array.isArray(imported.records)) {
+          if (imported && Array.isArray(imported.customers) && Array.isArray(imported.records)) {
             const existingSequences = state.numberSequences || {};
             state = { ...state, ...imported };
             state.numberSequences = {
               customer: Math.max(Number(existingSequences.customer) || 0, Number(state.numberSequences?.customer) || 0),
               payment: Math.max(Number(existingSequences.payment) || 0, Number(state.numberSequences?.payment) || 0)
             };
-            rebuildLedger();
+            if (!await rebuildLedger()) throw new Error('Restored records could not be saved to Supabase.');
+            await logAuditEvent('BACKUP_RESTORED');
             showToast("System restored successfully!");
             switchTab('dashboard');
           } else {
             showToast("Invalid backup file format.", "error");
           }
         } catch (err) {
-          showToast("Failed to parse JSON file.", "error");
+          state = stateBeforeImport;
+          await rebuildLedger(false);
+          showToast(`Failed to restore JSON backup: ${err.message}`, "error");
         }
       };
       reader.readAsText(file);
     }
 
     function confirmResetSystem() {
-      showModal("Reset System State", "Are you sure you want to reset all records and settings? This action cannot be undone.", () => {
+      if (!window.ElectroPayAuth.requireAdmin()) return;
+      showModal("Reset System State", "Are you sure you want to reset all records and settings? This action cannot be undone.", async () => {
+        const stateBeforeReset = JSON.parse(JSON.stringify(state));
         state.records = [];
         state.customers = [];
         state.deletedRecordIds = [];
@@ -3640,7 +3849,11 @@
         selectedPaymentIds.clear();
         activeCustomerId = '';
         state.settings = { rate: 10, receiptPrefix: "EPR-", paymentMethods: ["Cash", "eSewa", "Khalti", "Bank Transfer"] };
-        rebuildLedger();
+        if (!await rebuildLedger()) {
+          state = stateBeforeReset;
+          await rebuildLedger(false);
+          return;
+        }
         showToast("System state reset to defaults.");
         switchTab('dashboard');
       });

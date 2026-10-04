@@ -7,6 +7,9 @@ ElectroPay is a browser-based electricity payment ledger. Its interface and app 
 - `index.html` - app page and external library loading
 - `css/styles.css` - app-specific styling and print layouts
 - `js/app.js` - app state, ledger calculations, screens, receipts, and backup logic
+- `js/auth.js` - Supabase Auth session, login, password reset, and profile handling
+- `js/supabase-config.js` - public Supabase project URL and publishable key
+- `supabase/schema.sql` - organization tables, row security, role-checked RPCs, and audit log
 
 ## Customer records
 
@@ -20,10 +23,37 @@ Customers and payments have separate stable display references (`CUS-000001`, `P
 
 ## Deleted records
 
-Deleting a customer or payment moves it to Deleted Records instead of removing it immediately. Deleted customers and their active payments are grouped so restoring the customer restores the related payment history and recalculates active balances. Deleted payments are excluded from active lists, reports, receipts, and ledger calculations until restored. Permanently deleted items are recorded in a minimal local audit log.
+Deleting a customer or payment moves it to Deleted Records instead of removing it immediately. Deleted customers and their active payments are grouped so restoring the customer restores the related payment history and recalculates active balances. Deleted payments are excluded from active lists, reports, receipts, and ledger calculations until restored. Important record actions are recorded in the administrator-readable Supabase audit log.
 
-Trash items are retained for one calendar month. Because ElectroPay currently runs entirely in the browser and stores data in `localStorage`, automatic expiration cleanup can only run when the application is opened; it cannot run while the browser/app is closed. Deleted-by metadata is recorded as `Local user` because this version has no authentication system. Do not treat browser-only cleanup as a server-enforced retention guarantee.
+Trash items are retained for one calendar month. Expired items are purged when an administrator opens the application; cleanup does not run while the browser is closed. Authenticated user names are recorded for new trash operations; historical local records may continue to show `Local user`.
 
 ## Run
 
-Open `index.html` in a browser. Tailwind CSS, Chart.js, Lucide, and ExcelJS are loaded from CDNs, so an internet connection is needed for those libraries.
+Serve the project from `localhost` or deploy it to an HTTPS static host; do not open `index.html` as a `file://` URL. Tailwind CSS, Chart.js, Lucide, ExcelJS, and the Supabase browser SDK are loaded from CDNs, so an internet connection is needed.
+
+## Supabase authentication and access control
+
+ElectroPay requires a Supabase project. Until it is configured, the application remains on the login screen and does not load ledger records.
+
+1. Create a Supabase project and run [`supabase/schema.sql`](./supabase/schema.sql) in its SQL Editor.
+2. In Supabase Authentication, disable public sign-ups, enable email/password sign-in, require strong passwords (12 characters or more), configure email/SMTP delivery, and add the development and production HTTPS URLs to the allowed redirect URLs.
+3. Copy the project's Project URL and publishable/anon key into `url` and `anonKey` in [`js/supabase-config.js`](./js/supabase-config.js). These are browser-public values. Never use a `service_role` key or database password in frontend files.
+4. Create the first user from the Supabase Dashboard (Authentication → Users). Use that user's UUID in the following SQL to assign the initial administrator; replace the UUID and display name:
+
+   ```sql
+   insert into public.profiles (user_id, organization_id, full_name, role, active)
+   values (
+     '<AUTH_USER_UUID>'::uuid,
+     '8d711fa8-aeba-4e25-8e8d-759450822d4f'::uuid,
+     '<ADMIN_DISPLAY_NAME>',
+     'ADMIN',
+     true
+   );
+   ```
+
+5. Create additional users by inviting/creating them in Supabase Auth, then add each user's UUID to `public.profiles` with role `STAFF` or `ADMIN`. Disable access by setting `active = false`. Do not create application passwords or expose the Supabase service-role key. User provisioning and role assignment are intentionally performed in the provider dashboard/SQL Editor; there is no frontend user-management or password-viewing screen.
+6. Sign in as the initial administrator. If this browser has an older local ElectroPay ledger, first-time setup offers to import it into the new shared workspace. Confirming the import removes the old browser copy only after the cloud save succeeds. Canceling leaves both setup and the local ledger unchanged. Back up important local data before migration.
+
+The SQL schema stores the existing application state as one revisioned JSON document per organization so existing ledger, receipt, backup, and restore behavior can be preserved. It denies direct client access to the state table: reads and writes go through authenticated database functions, membership is checked against `profiles`, and role checks are enforced in SQL as well as in the interface. `STAFF` can add a payment and manage customer details, but cannot edit/delete existing payments, restore or permanently delete records, restore/import backups, or change system settings. Staff payments must use the configured rate and cannot be backdated before the latest ledger entry. The database rejects stale revisions rather than silently overwriting another user's save.
+
+Important login/logout, payment, backup, and settings events are written to `public.audit_log`; only administrators can query that log. The authoritative profile and password flows are handled by Supabase Auth. Configure Supabase's password-recovery redirect URLs for the deployed app. For production financial records, also configure Supabase backups/retention and verify the provider's project security settings before inviting users.
