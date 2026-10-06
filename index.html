@@ -125,17 +125,25 @@
       </div>
       <div class="mb-4 text-center">
         <p class="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-600 dark:text-amber-400">Access Required</p>
-        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Your account needs approval</h2>
+        <h2 id="restricted-access-title" class="text-2xl font-bold text-gray-900 dark:text-white">Access Pending</h2>
       </div>
-      <p class="text-center text-sm leading-6 text-gray-600 dark:text-gray-300">
-        Your account has been verified, but your profile does not yet have access to the existing business records.
-        Request access from an administrator to continue working with the active ledger.
+      <p id="restricted-access-description" class="text-center text-sm leading-6 text-gray-600 dark:text-gray-300">
+        Your account has been created, but it does not yet have access to the ElectroPay business workspace.
+        Request access from an administrator to continue.
       </p>
       <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
         Request status: <span id="access-request-status" class="ml-2 inline-flex items-center rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900 dark:bg-amber-800 dark:text-amber-100">PENDING</span>
       </div>
       <p id="request-access-message" class="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">Request access to existing business records.</p>
       <button id="request-access-button" type="button" class="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30">Request Access</button>
+      <div class="mt-5 flex items-center justify-between border-t border-gray-200 pt-4 text-xs dark:border-gray-700">
+        <span><strong id="restricted-profile-name"></strong><span id="restricted-profile-email" class="ml-2 text-gray-500 dark:text-gray-400"></span></span>
+        <span id="restricted-profile-role" class="font-semibold"></span>
+      </div>
+      <button id="restricted-account-button" type="button" class="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800">Profile &amp; password</button>
+      <button id="restricted-notifications-toggle" type="button" class="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800">View notifications <span id="restricted-notification-count" class="ml-1"></span></button>
+      <div id="restricted-notifications-list" class="hidden mt-2 max-h-56 space-y-2 overflow-y-auto"></div>
+      <button id="restricted-logout-button" type="button" class="mt-4 w-full rounded-lg px-3 py-2 text-xs font-medium text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">Log out</button>
     </div>
   </section>
 
@@ -280,6 +288,22 @@
             <p id="profile-email" class="max-w-36 truncate text-[10px] text-gray-500 dark:text-gray-400"></p>
             <p class="text-[10px] text-gray-500 dark:text-gray-400"><span id="profile-role"></span> · <span id="profile-status"></span></p>
           </div>
+          <div class="relative">
+            <button id="notifications-toggle" type="button" aria-label="Notifications" aria-expanded="false" class="relative rounded-lg border border-gray-300 p-2 text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">
+              <i data-lucide="bell" class="h-4 w-4" aria-hidden="true"></i>
+              <span id="notification-unread-count" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-red-600 px-1 text-[9px] font-bold leading-4 text-white"></span>
+            </button>
+            <div id="notifications-panel" class="hidden absolute right-0 top-11 z-[80] w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800">
+              <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Notifications</h3>
+                <span id="notification-panel-count" class="text-[10px] text-gray-500 dark:text-gray-400"></span>
+              </div>
+              <div id="notification-list" class="max-h-96 overflow-y-auto p-2"></div>
+            </div>
+          </div>
+          <button id="account-menu-button" type="button" class="rounded-lg border border-gray-300 px-2.5 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Account">
+            <i data-lucide="user-round" class="h-4 w-4" aria-hidden="true"></i>
+          </button>
           <button id="logout-button" type="button" class="rounded-lg border border-gray-300 px-2.5 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Log out">
             <span class="hidden sm:inline">Log out</span><i data-lucide="log-out" class="h-4 w-4 sm:hidden" aria-hidden="true"></i>
           </button>
@@ -659,10 +683,10 @@
             <table class="w-full min-w-[1100px] text-left text-sm">
               <thead class="bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                 <tr>
-                  <th class="px-4 py-3 text-center">
-                    <label class="inline-flex items-center gap-1.5 normal-case cursor-pointer">
+                  <th class="w-28 px-2 py-2 text-center align-middle">
+                    <label class="records-select-label mx-auto inline-flex max-w-24 items-center justify-center gap-1 normal-case cursor-pointer">
                       <input id="select-all-payments" type="checkbox" onchange="toggleSelectAllPayments(this.checked)" aria-label="Select all filtered payment records" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
-                      <span>Select all filtered results</span>
+                      <span>Select filtered results</span>
                     </label>
                   </th>
                   <th class="px-4 py-3 w-12" data-i18n="serialNumber">S.N.</th>
@@ -973,22 +997,35 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Review users, pending access requests, and staff permissions from a single place.</p>
             </div>
           </div>
+          <div class="flex flex-wrap gap-2 border-b border-gray-200 px-5 py-3 dark:border-gray-700" role="tablist" aria-label="Administration sections">
+            <button type="button" data-admin-panel="users" class="admin-panel-tab rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Staff &amp; Users</button>
+            <button type="button" data-admin-panel="notifications" class="admin-panel-tab rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">Notifications</button>
+            <button type="button" data-admin-panel="activity" class="admin-panel-tab rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">Activity</button>
+          </div>
+          <div id="admin-users-pane">
           <div class="grid grid-cols-1 md:grid-cols-4 gap-4 p-5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
             <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><p class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">All Staff</p><p id="staff-total-count" class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">0</p></div>
             <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><p class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Active</p><p id="staff-active-count" class="mt-2 text-2xl font-bold text-emerald-600">0</p></div>
             <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><p class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Pending Access</p><p id="staff-pending-access-count" class="mt-2 text-2xl font-bold text-amber-600">0</p></div>
-            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><p class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Verified</p><p id="staff-verified-count" class="mt-2 text-2xl font-bold text-blue-600">0</p></div>
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><p class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Approved Access</p><p id="staff-verified-count" class="mt-2 text-2xl font-bold text-blue-600">0</p></div>
           </div>
           <div class="p-5">
+            <div class="mb-3 flex flex-col gap-2 sm:flex-row">
+              <input id="staff-search" type="search" placeholder="Search staff name or email" class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+              <select id="staff-status-filter" class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-white" aria-label="Filter staff by access status">
+                <option value="ALL">All statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="SUSPENDED">Suspended</option><option value="REJECTED">Rejected</option>
+              </select>
+            </div>
             <div class="overflow-x-auto">
-              <table class="w-full min-w-[900px] text-left text-sm">
+              <table class="w-full min-w-[1180px] text-left text-sm">
                 <thead class="bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                   <tr>
                     <th class="px-3 py-3">Staff</th>
                     <th class="px-3 py-3">Role</th>
-                    <th class="px-3 py-3">Status</th>
                     <th class="px-3 py-3">Data Access</th>
+                    <th class="px-3 py-3">Email</th>
                     <th class="px-3 py-3">Joined</th>
+                    <th class="px-3 py-3">Last Login</th>
                     <th class="px-3 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -996,7 +1033,52 @@
               </table>
             </div>
           </div>
+          </div>
+          <div id="admin-notifications-pane" class="hidden grid grid-cols-1 gap-5 p-5 xl:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
+            <form id="admin-notification-form" class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+              <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Create notification</h4>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Title
+                <input id="admin-notification-title" maxlength="160" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+              </label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Message
+                <textarea id="admin-notification-message" maxlength="5000" rows="4" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"></textarea>
+              </label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Priority
+                <select id="admin-notification-priority" class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="LOW">Low</option></select>
+              </label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Recipients <span class="font-normal">(choose none to send to all staff)</span>
+                <select id="admin-notification-recipients" multiple size="5" class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"></select>
+              </label>
+              <button id="admin-notification-send" type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Send notification</button>
+            </form>
+            <div>
+              <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Sent notifications</h4>
+              <div id="admin-notifications-list" class="space-y-2"></div>
+            </div>
+          </div>
+          <div id="admin-activity-pane" class="hidden p-5">
+            <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Recent activity</h4>
+            <div id="admin-activity-list" class="max-h-[32rem] space-y-2 overflow-y-auto"></div>
+          </div>
         </div>
+      </section>
+
+      <section id="staff-edit-dialog" class="fixed inset-0 z-[110] hidden items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="staff-edit-title">
+        <form id="staff-edit-form" class="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-900">
+          <div class="flex items-center justify-between">
+            <h2 id="staff-edit-title" class="text-base font-bold text-gray-900 dark:text-white">Edit staff profile</h2>
+            <button id="staff-edit-dialog-close" type="button" class="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close edit dialog"><i data-lucide="x" class="h-4 w-4" aria-hidden="true"></i></button>
+          </div>
+          <input id="staff-edit-user-id" type="hidden">
+          <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Full name
+            <input id="staff-edit-name" maxlength="120" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+          </label>
+          <p class="text-[11px] text-gray-500 dark:text-gray-400">Email and role are managed by Supabase Auth and administrator policy.</p>
+          <div class="flex justify-end gap-2">
+            <button type="button" onclick="document.getElementById('staff-edit-dialog-close').click()" class="rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-600 dark:border-gray-600 dark:text-gray-300">Cancel</button>
+            <button type="submit" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Save profile</button>
+          </div>
+        </form>
       </section>
 
       <!-- RECEIPT VIEW (MODAL / SCREEN) -->
@@ -1184,6 +1266,47 @@
   <!-- TOAST CONTAINER -->
   <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
   </div>
+
+  <section id="account-dialog" class="fixed inset-0 z-[120] hidden items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" aria-labelledby="account-dialog-title" role="dialog" aria-modal="true">
+    <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-900 sm:p-7">
+      <div class="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h2 id="account-dialog-title" class="text-lg font-bold text-gray-900 dark:text-white">Account &amp; Profile</h2>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Manage your profile and sign-in credentials.</p>
+        </div>
+        <button id="account-dialog-close" type="button" class="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close account dialog"><i data-lucide="x" class="h-4 w-4" aria-hidden="true"></i></button>
+      </div>
+      <form id="profile-form" class="space-y-3">
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Full name
+          <input id="account-full-name" maxlength="120" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+        </label>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Email address
+          <input id="account-email" readonly class="mt-1 w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+        </label>
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <p>Role <strong id="account-role" class="mt-1 block text-gray-900 dark:text-white"></strong></p>
+          <p>Access <strong id="account-access" class="mt-1 block text-gray-900 dark:text-white"></strong></p>
+          <p class="col-span-2">Organization <strong id="account-organization" class="mt-1 block text-gray-900 dark:text-white"></strong></p>
+        </div>
+        <button type="submit" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Save profile</button>
+        <p id="profile-form-message" class="text-xs" role="status" aria-live="polite"></p>
+      </form>
+      <form id="change-password-form" class="mt-6 space-y-3 border-t border-gray-200 pt-5 dark:border-gray-700">
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Change password</h3>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Current password
+          <input id="current-password" type="password" autocomplete="current-password" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+        </label>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">New password
+          <input id="new-password" type="password" autocomplete="new-password" minlength="12" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+        </label>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-300">Confirm new password
+          <input id="confirm-new-password" type="password" autocomplete="new-password" minlength="12" required class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+        </label>
+        <button id="change-password-button" type="submit" class="rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800">Update password</button>
+        <p id="password-form-message" class="text-xs" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </section>
 
   <div id="electropay-modal" class="ep-modal-backdrop hidden" role="presentation" aria-hidden="true">
     <section data-modal-panel class="ep-modal-panel" role="dialog" aria-modal="true" aria-labelledby="electropay-modal-title" aria-describedby="electropay-modal-message" tabindex="-1">

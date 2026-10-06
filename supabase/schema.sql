@@ -45,6 +45,29 @@ create table if not exists public.electropay_permissions (
   primary key (organization_id, user_id, permission_key)
 );
 
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sender_id uuid references auth.users (id) on delete set null,
+  title text not null check (length(trim(title)) between 1 and 160),
+  message text not null check (length(trim(message)) between 1 and 5000),
+  priority text not null default 'NORMAL' check (priority in ('LOW', 'NORMAL', 'HIGH')),
+  created_at timestamptz not null default now(),
+  archived_at timestamptz
+);
+
+create table if not exists public.notification_recipients (
+  notification_id uuid not null references public.notifications (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  read_at timestamptz,
+  primary key (notification_id, user_id)
+);
+
+create index if not exists notification_recipients_user_unread_idx
+  on public.notification_recipients (user_id, read_at, notification_id);
+create index if not exists notifications_org_created_idx
+  on public.notifications (organization_id, created_at desc);
+
 do $$
 declare
   v_has_access_granted boolean;
@@ -135,6 +158,15 @@ begin
   )
   on conflict (user_id) do nothing;
 
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (
+    '8d711fa8-aeba-4e25-8e8d-759450822d4f'::uuid,
+    new.id,
+    'USER_REGISTERED',
+    'USER',
+    new.id::text
+  );
+
   return new;
 end;
 $$;
@@ -180,18 +212,59 @@ create table if not exists public.audit_log (
   occurred_at timestamptz not null default now()
 );
 
+create or replace function public.log_electropay_email_verified()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_organization_id uuid;
+begin
+  if new.email_confirmed_at is not null
+     and old.email_confirmed_at is distinct from new.email_confirmed_at then
+    select p.organization_id into v_organization_id
+    from public.profiles p
+    where p.user_id = new.id;
+    if v_organization_id is not null then
+      insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+      values (v_organization_id, new.id, 'EMAIL_VERIFIED', 'USER', new.id::text);
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists on_auth_user_email_verified on auth.users;
+create trigger on_auth_user_email_verified
+after update of email_confirmed_at on auth.users
+for each row execute procedure public.log_electropay_email_verified();
+
 alter table public.profiles enable row level security;
 alter table public.staff_access_requests enable row level security;
 alter table public.electropay_permissions enable row level security;
+alter table public.notifications enable row level security;
+alter table public.notification_recipients enable row level security;
 alter table public.electropay_state enable row level security;
 alter table public.audit_log enable row level security;
 
-revoke all on public.organizations, public.profiles, public.staff_access_requests, public.electropay_permissions, public.electropay_state, public.audit_log from anon, authenticated;
+revoke all on public.organizations, public.profiles, public.staff_access_requests, public.electropay_permissions, public.notifications, public.notification_recipients, public.electropay_state, public.audit_log from anon, authenticated;
 grant select on public.profiles, public.audit_log to authenticated;
 
 drop function if exists public.electropay_current_profile();
 create or replace function public.electropay_current_profile()
-returns table (user_id uuid, organization_id uuid, role text, active boolean, full_name text, has_business_data_access boolean, access_status text)
+returns table (
+  user_id uuid,
+  organization_id uuid,
+  organization_name text,
+  role text,
+  active boolean,
+  full_name text,
+  has_business_data_access boolean,
+  access_status text,
+  has_pending_access_request boolean,
+  email_confirmed boolean
+)
 language sql
 stable
 security definer
@@ -199,17 +272,19 @@ set search_path = ''
 as $$
   select p.user_id,
          p.organization_id,
+         o.name,
          p.role,
          p.active,
          p.full_name,
-         (p.role = 'ADMIN' or exists (
+         (p.active and (p.role = 'ADMIN' or exists (
            select 1
            from public.electropay_permissions ep
            where ep.organization_id = p.organization_id
              and ep.user_id = p.user_id
              and ep.permission_key = 'BUSINESS_DATA_READ'
-         )),
+         ))),
          case
+           when not p.active then 'SUSPENDED'
            when p.role = 'ADMIN' or exists (
              select 1
              from public.electropay_permissions ep
@@ -217,13 +292,22 @@ as $$
                and ep.user_id = p.user_id
                and ep.permission_key = 'BUSINESS_DATA_READ'
            ) then 'APPROVED'
+           when (select r.request_status from public.staff_access_requests r
+                   where r.user_id = p.user_id) = 'REVOKED' then 'SUSPENDED'
            else coalesce((
              select r.request_status
              from public.staff_access_requests r
              where r.user_id = p.user_id
            ), 'PENDING')
-         end
+         end,
+         exists (
+             select 1 from public.staff_access_requests r
+             where r.user_id = p.user_id and r.request_status = 'PENDING'
+         ),
+         u.email_confirmed_at is not null
   from public.profiles p
+  join public.organizations o on o.id = p.organization_id
+  join auth.users u on u.id = p.user_id
   where p.user_id = (select auth.uid())
 $$;
 
@@ -249,10 +333,13 @@ returns table (
   user_id uuid,
   full_name text,
   email text,
+  role text,
   active boolean,
   has_business_data_access boolean,
   access_status text,
-  created_at timestamptz
+  email_confirmed boolean,
+  created_at timestamptz,
+  last_sign_in_at timestamptz
 )
 language plpgsql
 security definer
@@ -275,15 +362,18 @@ begin
   select p.user_id,
          p.full_name,
          coalesce(u.email, ''),
+         p.role,
          p.active,
-         exists (
+         (p.active and (p.role = 'ADMIN' or exists (
            select 1
            from public.electropay_permissions ep
            where ep.organization_id = p.organization_id
              and ep.user_id = p.user_id
              and ep.permission_key = 'BUSINESS_DATA_READ'
-         ),
+         ))),
          case
+           when not p.active then 'SUSPENDED'
+           when p.role = 'ADMIN' then 'APPROVED'
            when exists (
              select 1
              from public.electropay_permissions ep
@@ -291,15 +381,320 @@ begin
                and ep.user_id = p.user_id
                and ep.permission_key = 'BUSINESS_DATA_READ'
            ) then 'APPROVED'
+           when r.request_status = 'REVOKED' then 'SUSPENDED'
            else coalesce(r.request_status, 'PENDING')
          end,
-         p.created_at
+         u.email_confirmed_at is not null,
+         p.created_at,
+         u.last_sign_in_at
   from public.profiles p
   join auth.users u on u.id = p.user_id
   left join public.staff_access_requests r on r.user_id = p.user_id
   where p.organization_id = v_organization_id
-    and p.role = 'STAFF'
+    and p.role in ('ADMIN', 'STAFF')
   order by p.created_at;
+end
+$$;
+
+create or replace function public.electropay_update_my_profile(p_full_name text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if nullif(trim(p_full_name), '') is null or length(trim(p_full_name)) > 120 then
+    raise exception 'Enter a name between 1 and 120 characters.' using errcode = '22023';
+  end if;
+  update public.profiles set full_name = trim(p_full_name)
+  where user_id = (select auth.uid());
+  if not found then
+    raise exception 'The ElectroPay profile could not be found.' using errcode = 'P0002';
+  end if;
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  select p.organization_id, p.user_id, 'PROFILE_UPDATED', 'USER', p.user_id::text
+  from public.profiles p
+  where p.user_id = (select auth.uid());
+end
+$$;
+
+create or replace function public.electropay_update_staff_profile(p_user_id uuid, p_full_name text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_profile public.profiles%rowtype;
+begin
+  select * into v_profile from public.profiles where user_id = p_user_id;
+  if not found or v_profile.role <> 'STAFF' or not v_profile.active
+     or not public.electropay_is_active_admin(v_profile.organization_id) then
+    raise exception 'Only an active administrator can edit staff profiles.' using errcode = '42501';
+  end if;
+  if nullif(trim(p_full_name), '') is null or length(trim(p_full_name)) > 120 then
+    raise exception 'Enter a name between 1 and 120 characters.' using errcode = '22023';
+  end if;
+  update public.profiles set full_name = trim(p_full_name) where user_id = p_user_id;
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_profile.organization_id, (select auth.uid()), 'PROFILE_UPDATED', 'STAFF', p_user_id::text);
+end
+$$;
+
+create or replace function public.electropay_set_staff_active(p_user_id uuid, p_active boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_profile public.profiles%rowtype;
+begin
+  select * into v_profile from public.profiles where user_id = p_user_id;
+  if not found or v_profile.role <> 'STAFF'
+     or not public.electropay_is_active_admin(v_profile.organization_id) then
+    raise exception 'Only an active administrator can change staff status.' using errcode = '42501';
+  end if;
+
+  update public.profiles set active = p_active where user_id = p_user_id;
+  if not p_active then
+    delete from public.electropay_permissions
+    where organization_id = v_profile.organization_id
+      and user_id = p_user_id
+      and permission_key = 'BUSINESS_DATA_READ';
+    update public.staff_access_requests
+    set request_status = 'REVOKED',
+        reviewed_by = (select auth.uid()),
+        reviewed_at = now()
+    where user_id = p_user_id;
+  end if;
+
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_profile.organization_id, (select auth.uid()),
+          case when p_active then 'STAFF_REACTIVATED' else 'STAFF_SUSPENDED' end,
+          'STAFF', p_user_id::text);
+end
+$$;
+
+create or replace function public.electropay_reject_staff_access(p_user_id uuid, p_notes text default null)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_profile public.profiles%rowtype;
+begin
+  select * into v_profile from public.profiles where user_id = p_user_id;
+  if not found or v_profile.role <> 'STAFF'
+     or not public.electropay_is_active_admin(v_profile.organization_id) then
+    raise exception 'Only an active administrator can reject staff access.' using errcode = '42501';
+  end if;
+  delete from public.electropay_permissions
+  where organization_id = v_profile.organization_id
+    and user_id = p_user_id
+    and permission_key = 'BUSINESS_DATA_READ';
+  insert into public.staff_access_requests
+    (user_id, full_name, email, requested_access, request_status, reviewed_by, reviewed_at, notes)
+  select p.user_id, p.full_name, coalesce(u.email, ''), 'Existing business records',
+         'REJECTED', (select auth.uid()), now(), p_notes
+  from public.profiles p join auth.users u on u.id = p.user_id
+  where p.user_id = p_user_id
+  on conflict (user_id) do update
+  set request_status = 'REJECTED',
+      reviewed_by = excluded.reviewed_by,
+      reviewed_at = excluded.reviewed_at,
+      notes = coalesce(excluded.notes, public.staff_access_requests.notes);
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_profile.organization_id, (select auth.uid()), 'ACCESS_REJECTED', 'STAFF', p_user_id::text);
+end
+$$;
+
+create or replace function public.electropay_list_activity(p_limit integer default 100)
+returns table (
+  id bigint,
+  occurred_at timestamptz,
+  actor_name text,
+  actor_email text,
+  action text,
+  record_type text,
+  record_id text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_organization_id uuid;
+begin
+  select p.organization_id into v_organization_id
+  from public.profiles p
+  where p.user_id = (select auth.uid()) and p.role = 'ADMIN' and p.active;
+  if v_organization_id is null then
+    raise exception 'Only an active administrator can view activity.' using errcode = '42501';
+  end if;
+  return query
+  select a.id, a.occurred_at, coalesce(p.full_name, 'Former user'),
+         coalesce(u.email, ''), a.action, a.record_type, a.record_id
+  from public.audit_log a
+  left join public.profiles p on p.user_id = a.actor_id
+  left join auth.users u on u.id = a.actor_id
+  where a.organization_id = v_organization_id
+  order by a.occurred_at desc
+  limit greatest(1, least(coalesce(p_limit, 100), 500));
+end
+$$;
+
+create or replace function public.electropay_send_notification(
+  p_title text,
+  p_message text,
+  p_priority text default 'NORMAL',
+  p_user_ids uuid[] default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_organization_id uuid;
+  v_notification_id uuid;
+  v_recipient_count integer;
+begin
+  select p.organization_id into v_organization_id
+  from public.profiles p
+  where p.user_id = (select auth.uid()) and p.role = 'ADMIN' and p.active;
+  if v_organization_id is null then
+    raise exception 'Only an active administrator can send notifications.' using errcode = '42501';
+  end if;
+  if nullif(trim(p_title), '') is null or length(trim(p_title)) > 160
+     or nullif(trim(p_message), '') is null or length(trim(p_message)) > 5000
+     or p_priority not in ('LOW', 'NORMAL', 'HIGH') then
+    raise exception 'Enter a valid notification title, message, and priority.' using errcode = '22023';
+  end if;
+  if p_user_ids is not null and exists (
+    select 1
+    from unnest(p_user_ids) requested(user_id)
+    left join public.profiles p
+      on p.user_id = requested.user_id
+     and p.organization_id = v_organization_id
+     and p.role = 'STAFF'
+     and p.active
+    where p.user_id is null
+  ) then
+    raise exception 'Recipients must be active staff in the administrator organization.' using errcode = '42501';
+  end if;
+
+  insert into public.notifications (organization_id, sender_id, title, message, priority)
+  values (v_organization_id, (select auth.uid()), trim(p_title), trim(p_message), p_priority)
+  returning id into v_notification_id;
+
+  insert into public.notification_recipients (notification_id, user_id)
+  select v_notification_id, p.user_id
+  from public.profiles p
+  where p.organization_id = v_organization_id
+    and p.role = 'STAFF'
+    and p.active
+    and (p_user_ids is null or p.user_id = any(p_user_ids));
+  get diagnostics v_recipient_count = row_count;
+  if v_recipient_count = 0 then
+    raise exception 'Select at least one active staff recipient.' using errcode = '22023';
+  end if;
+
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_organization_id, (select auth.uid()), 'NOTIFICATION_SENT', 'NOTIFICATION', v_notification_id::text);
+  return v_notification_id;
+end
+$$;
+
+create or replace function public.electropay_list_my_notifications()
+returns table (
+  notification_id uuid,
+  title text,
+  message text,
+  priority text,
+  created_at timestamptz,
+  read_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select n.id, n.title, n.message, n.priority, n.created_at, nr.read_at
+  from public.notification_recipients nr
+  join public.notifications n on n.id = nr.notification_id
+  where nr.user_id = (select auth.uid()) and n.archived_at is null
+  order by n.created_at desc
+  limit 100
+$$;
+
+create or replace function public.electropay_mark_notification_read(p_notification_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.notification_recipients
+  set read_at = coalesce(read_at, now())
+  where notification_id = p_notification_id and user_id = (select auth.uid());
+  if not found then
+    raise exception 'Notification not found for this account.' using errcode = 'P0002';
+  end if;
+end
+$$;
+
+create or replace function public.electropay_admin_list_notifications()
+returns table (
+  notification_id uuid,
+  title text,
+  message text,
+  priority text,
+  created_at timestamptz,
+  archived_at timestamptz,
+  recipient_count bigint,
+  read_count bigint
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_organization_id uuid;
+begin
+  select p.organization_id into v_organization_id
+  from public.profiles p
+  where p.user_id = (select auth.uid()) and p.role = 'ADMIN' and p.active;
+  if v_organization_id is null then
+    raise exception 'Only an active administrator can manage notifications.' using errcode = '42501';
+  end if;
+  return query
+  select n.id, n.title, n.message, n.priority, n.created_at, n.archived_at,
+         count(nr.user_id), count(nr.read_at)
+  from public.notifications n
+  left join public.notification_recipients nr on nr.notification_id = n.id
+  where n.organization_id = v_organization_id
+  group by n.id
+  order by n.created_at desc
+  limit 100;
+end
+$$;
+
+create or replace function public.electropay_archive_notification(p_notification_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.notifications n
+  set archived_at = now()
+  where n.id = p_notification_id
+    and public.electropay_is_active_admin(n.organization_id);
+  if not found then
+    raise exception 'Notification not found or administrator access denied.' using errcode = '42501';
+  end if;
 end
 $$;
 
@@ -319,8 +714,9 @@ create policy audit_read_admin
 on public.audit_log for select to authenticated
 using (public.electropay_is_active_admin(organization_id));
 
-create or replace function public.request_electropay_data_access(p_requested_access text default 'Existing business records')
-returns public.staff_access_requests
+drop function if exists public.request_electropay_data_access(text);
+create function public.request_electropay_data_access(p_requested_access text default 'Existing business records')
+returns jsonb
 language plpgsql
 security definer
 set search_path = ''
@@ -345,6 +741,13 @@ begin
   ) then
     raise exception 'Business-data access has already been granted.' using errcode = '22023';
   end if;
+  select * into v_request
+  from public.staff_access_requests
+  where user_id = v_profile.user_id
+    and request_status = 'PENDING';
+  if found then
+    return jsonb_build_object('request', to_jsonb(v_request), 'already_pending', true);
+  end if;
 
   insert into public.staff_access_requests (user_id, full_name, email, requested_access, request_status)
   values (
@@ -365,7 +768,9 @@ begin
         notes = null
   returning * into v_request;
 
-  return v_request;
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_profile.organization_id, v_profile.user_id, 'ACCESS_REQUESTED', 'STAFF', v_profile.user_id::text);
+  return jsonb_build_object('request', to_jsonb(v_request), 'already_pending', false);
 end
 $$;
 
@@ -381,7 +786,7 @@ begin
   select * into v_profile
   from public.profiles
   where user_id = p_user_id;
-  if not found or v_profile.role <> 'STAFF'
+  if not found or v_profile.role <> 'STAFF' or not v_profile.active
      or not public.electropay_is_active_admin(v_profile.organization_id) then
     raise exception 'Only an active administrator can approve access.' using errcode = '42501';
   end if;
@@ -405,6 +810,20 @@ begin
       notes = coalesce(p_notes, notes)
   where user_id = p_user_id;
 
+  insert into public.staff_access_requests
+    (user_id, full_name, email, requested_access, request_status, reviewed_by, reviewed_at, notes)
+  select v_profile.user_id, v_profile.full_name, coalesce(u.email, ''),
+         'Existing business records', 'APPROVED', (select auth.uid()), now(), p_notes
+  from auth.users u
+  where u.id = v_profile.user_id
+  on conflict (user_id) do update
+  set request_status = 'APPROVED',
+      reviewed_by = excluded.reviewed_by,
+      reviewed_at = excluded.reviewed_at,
+      notes = coalesce(excluded.notes, public.staff_access_requests.notes);
+
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_profile.organization_id, (select auth.uid()), 'ACCESS_APPROVED', 'STAFF', p_user_id::text);
   return v_profile;
 end
 $$;
@@ -437,6 +856,9 @@ begin
       reviewed_at = now(),
       notes = coalesce(p_notes, notes)
   where user_id = p_user_id;
+
+  insert into public.audit_log (organization_id, actor_id, action, record_type, record_id)
+  values (v_profile.organization_id, (select auth.uid()), 'STAFF_SUSPENDED', 'STAFF', p_user_id::text);
 end
 $$;
 
@@ -862,14 +1284,17 @@ declare
   v_profile record;
 begin
   select * into v_profile from public.electropay_current_profile();
-  if not found or not v_profile.active then
-    raise exception 'An active ElectroPay account is required.' using errcode = '42501';
+  if not found then
+    raise exception 'An authenticated ElectroPay account is required.' using errcode = '42501';
   end if;
   if p_action not in ('LOGIN', 'LOGOUT', 'BACKUP_CREATED', 'BACKUP_RESTORED') then
     raise exception 'Unsupported audit action.' using errcode = '22023';
   end if;
   if p_action in ('BACKUP_CREATED', 'BACKUP_RESTORED') and v_profile.role <> 'ADMIN' then
     raise exception 'This action requires an administrator role.' using errcode = '42501';
+  end if;
+  if p_action in ('BACKUP_CREATED', 'BACKUP_RESTORED') and not v_profile.active then
+    raise exception 'An active administrator account is required.' using errcode = '42501';
   end if;
 
   insert into public.audit_log (organization_id, actor_id, action)
@@ -880,18 +1305,38 @@ $$;
 revoke all on function public.electropay_current_profile() from public, anon;
 revoke all on function public.electropay_is_active_admin(uuid) from public, anon;
 revoke all on function public.electropay_list_staff() from public, anon;
+revoke all on function public.electropay_update_my_profile(text) from public, anon;
+revoke all on function public.electropay_update_staff_profile(uuid, text) from public, anon;
+revoke all on function public.electropay_set_staff_active(uuid, boolean) from public, anon;
+revoke all on function public.electropay_reject_staff_access(uuid, text) from public, anon;
+revoke all on function public.electropay_list_activity(integer) from public, anon;
 revoke all on function public.request_electropay_data_access(text) from public, anon;
 revoke all on function public.approve_staff_access(uuid, text) from public, anon;
 revoke all on function public.revoke_staff_access(uuid, text) from public, anon;
+revoke all on function public.electropay_send_notification(text, text, text, uuid[]) from public, anon;
+revoke all on function public.electropay_list_my_notifications() from public, anon;
+revoke all on function public.electropay_mark_notification_read(uuid) from public, anon;
+revoke all on function public.electropay_admin_list_notifications() from public, anon;
+revoke all on function public.electropay_archive_notification(uuid) from public, anon;
 revoke all on function public.get_electropay_state() from public, anon;
 revoke all on function public.save_electropay_state(jsonb, bigint) from public, anon;
 revoke all on function public.log_electropay_event(text) from public, anon;
 grant execute on function public.electropay_current_profile() to authenticated;
 grant execute on function public.electropay_is_active_admin(uuid) to authenticated;
 grant execute on function public.electropay_list_staff() to authenticated;
+grant execute on function public.electropay_update_my_profile(text) to authenticated;
+grant execute on function public.electropay_update_staff_profile(uuid, text) to authenticated;
+grant execute on function public.electropay_set_staff_active(uuid, boolean) to authenticated;
+grant execute on function public.electropay_reject_staff_access(uuid, text) to authenticated;
+grant execute on function public.electropay_list_activity(integer) to authenticated;
 grant execute on function public.request_electropay_data_access(text) to authenticated;
 grant execute on function public.approve_staff_access(uuid, text) to authenticated;
 grant execute on function public.revoke_staff_access(uuid, text) to authenticated;
+grant execute on function public.electropay_send_notification(text, text, text, uuid[]) to authenticated;
+grant execute on function public.electropay_list_my_notifications() to authenticated;
+grant execute on function public.electropay_mark_notification_read(uuid) to authenticated;
+grant execute on function public.electropay_admin_list_notifications() to authenticated;
+grant execute on function public.electropay_archive_notification(uuid) to authenticated;
 grant execute on function public.get_electropay_state() to authenticated;
 grant execute on function public.save_electropay_state(jsonb, bigint) to authenticated;
 grant execute on function public.log_electropay_event(text) to authenticated;

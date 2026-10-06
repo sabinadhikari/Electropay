@@ -74,24 +74,21 @@
     }
 
     #select-all-payments + span {
-      font-size: 0.7rem;
+      font-size: 0.65rem;
       line-height: 1.2;
     }
 
-    thead th {
+    #tab-records thead th {
       padding-top: 0.75rem !important;
       padding-bottom: 0.75rem !important;
     }
 
     #records-tbody td {
-      padding-top: 0.65rem !important;
-      padding-bottom: 0.65rem !important;
+      padding: 0.6rem 0.7rem !important;
       vertical-align: middle;
     }
 
-    #records-tbody td:last-child,
-    #records-tbody td:nth-last-child(2),
-    #records-tbody td:nth-last-child(3) {
+    #records-tbody td:nth-child(n + 8):nth-child(-n + 14) {
       white-space: nowrap;
     }
 

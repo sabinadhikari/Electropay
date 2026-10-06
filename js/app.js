@@ -874,32 +874,87 @@
       }
     }
 
+    let staffManagementRows = [];
+
     async function renderStaffManagement() {
       const tbody = document.getElementById('staff-management-tbody');
       if (!tbody) return;
-      tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-6 text-center text-xs text-gray-500">Loading staff…</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="px-3 py-6 text-center text-xs text-gray-500">Loading staff…</td></tr>';
 
       try {
         const { data, error } = await window.ElectroPayAuth.client.rpc('electropay_list_staff');
         if (error) throw error;
-        const rows = Array.isArray(data) ? data : [];
-        tbody.innerHTML = rows.length ? rows.map(member => {
+        staffManagementRows = Array.isArray(data) ? data : [];
+        renderStaffManagementRows();
+        const recipientSelect = document.getElementById('admin-notification-recipients');
+        const selectedRecipients = new Set([...recipientSelect.selectedOptions].map(option => option.value));
+        recipientSelect.replaceChildren();
+        for (const member of staffManagementRows.filter(item => item.active && item.role === 'STAFF')) {
+          const option = document.createElement('option');
+          option.value = member.user_id;
+          option.textContent = `${member.full_name || member.email} · ${member.email}`;
+          option.selected = selectedRecipients.has(member.user_id);
+          recipientSelect.appendChild(option);
+        }
+        void renderAdminNotifications().catch(error => {
+          console.error('Could not load administrator notifications:', error);
+          document.getElementById('admin-notifications-list').textContent =
+            'Sent notifications could not be loaded.';
+        });
+        void renderAdminActivity().catch(error => {
+          console.error('Could not load administrator activity:', error);
+          document.getElementById('admin-activity-list').textContent =
+            'Activity could not be loaded.';
+        });
+      } catch (error) {
+        console.error('Could not load staff management data:', error);
+        tbody.innerHTML = `<tr><td colspan="7" class="px-3 py-6 text-center text-xs text-red-600">Could not load staff: ${escapeHtml(error.message)}</td></tr>`;
+        showToast('Staff management could not be loaded.', 'error');
+      }
+    }
+
+    function renderStaffManagementRows() {
+      const tbody = document.getElementById('staff-management-tbody');
+      const search = document.getElementById('staff-search')?.value.trim().toLowerCase() || '';
+      const statusFilter = document.getElementById('staff-status-filter')?.value || 'ALL';
+      const rows = staffManagementRows.filter(member => {
+        const status = member.access_status || 'PENDING';
+        const matchesSearch = !search ||
+          `${member.full_name || ''} ${member.email || ''}`.toLowerCase().includes(search);
+        return matchesSearch && (statusFilter === 'ALL' || status === statusFilter);
+      });
+      tbody.innerHTML = rows.length ? rows.map(member => {
           const name = member.full_name?.trim() || 'Unnamed staff';
           const initials = name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase();
-          const status = member.active ? 'Active' : 'Suspended';
-          const access = member.has_business_data_access ? 'APPROVED' : member.access_status;
-          const accessLabel = access || 'PENDING';
+          const accessLabel = member.access_status || 'PENDING';
           const accessClass = accessLabel === 'APPROVED'
             ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
             : accessLabel === 'PENDING'
               ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-              : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300';
-          const action = member.has_business_data_access ? 'revoke' : 'approve';
-          const actionLabel = member.has_business_data_access ? 'Revoke' : 'Approve';
-          const actionClass = member.has_business_data_access
-            ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
-            : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
-          const joined = member.created_at ? new Date(member.created_at).toLocaleDateString() : '—';
+              : accessLabel === 'REJECTED'
+                ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300';
+          const joined = member.created_at ? new Date(member.created_at).toLocaleString() : '—';
+          const lastLogin = member.last_sign_in_at ? new Date(member.last_sign_in_at).toLocaleString() : 'Never';
+          const button = (action, label, classes) =>
+            `<button type="button" data-staff-action="${action}" data-user-id="${escapeHtml(member.user_id)}" class="rounded-lg border px-2 py-1 text-[10px] font-semibold ${classes}">${label}</button>`;
+          const actions = member.role !== 'STAFF' ? ['<span class="text-[10px] font-medium text-gray-400">Protected admin</span>'] : [
+            button('edit', 'Edit', 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200'),
+            member.active && !member.has_business_data_access
+              ? button('approve', 'Approve', 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300')
+              : '',
+            member.active && member.has_business_data_access
+              ? button('revoke', 'Revoke', 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300')
+              : '',
+            member.active && accessLabel === 'PENDING'
+              ? button('reject', 'Deny', 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200')
+              : '',
+            button(member.active ? 'suspend' : 'reactivate',
+              member.active ? 'Suspend' : 'Reactivate',
+              member.active
+                ? 'border-red-200 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300'
+                : 'border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300')
+          ].join('');
 
           return `
             <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
@@ -911,31 +966,28 @@
                     <p class="text-[11px] text-gray-500 dark:text-gray-400">${escapeHtml(member.email || '')}</p>
                   </div>
                 </div>
-              </td>
-              <td class="px-3 py-3"><span class="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">STAFF</span></td>
-              <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${member.active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${status}</span></td>
-              <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${accessClass}">${escapeHtml(accessLabel)}</span></td>
-              <td class="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">${escapeHtml(joined)}</td>
-              <td class="px-3 py-3">
-                <div class="flex items-center justify-end gap-1.5">
-                  <button type="button" data-staff-action="${action}" data-user-id="${escapeHtml(member.user_id)}" class="rounded-lg border px-2 py-1 text-[10px] font-semibold ${actionClass}">${actionLabel}</button>
-                </div>
-              </td>
-            </tr>
-          `;
-        }).join('') : '<tr><td colspan="6" class="px-3 py-6 text-center text-xs text-gray-500">No staff accounts found.</td></tr>';
+                </td>
+                <td class="px-3 py-3"><span class="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapeHtml(member.role)}</span></td>
+                <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${accessClass}">${escapeHtml(accessLabel)}</span></td>
+                <td class="px-3 py-3 text-xs">${member.email_confirmed
+                  ? '<span class="text-emerald-700 dark:text-emerald-300">Verified</span>'
+                  : '<span class="text-amber-700 dark:text-amber-300">Unverified</span>'}</td>
+                <td class="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">${escapeHtml(joined)}</td>
+                <td class="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">${escapeHtml(lastLogin)}</td>
+                <td class="px-3 py-3">
+                  <div class="flex items-center justify-end gap-1.5">${actions}</div>
+                </td>
+              </tr>
+            `;
+          }).join('') : '<tr><td colspan="7" class="px-3 py-6 text-center text-xs text-gray-500">No matching staff accounts found.</td></tr>';
 
-        document.getElementById('staff-total-count').textContent = rows.length;
-        document.getElementById('staff-active-count').textContent = rows.filter(member => member.active).length;
+        const staffRows = staffManagementRows.filter(member => member.role === 'STAFF');
+        document.getElementById('staff-total-count').textContent = staffRows.length;
+        document.getElementById('staff-active-count').textContent = staffRows.filter(member => member.active).length;
         document.getElementById('staff-pending-access-count').textContent =
-          rows.filter(member => !member.has_business_data_access && member.access_status === 'PENDING').length;
+          staffRows.filter(member => !member.has_business_data_access && member.access_status === 'PENDING').length;
         document.getElementById('staff-verified-count').textContent =
-          rows.filter(member => member.has_business_data_access).length;
-      } catch (error) {
-        console.error('Could not load staff management data:', error);
-        tbody.innerHTML = `<tr><td colspan="6" class="px-3 py-6 text-center text-xs text-red-600">Could not load staff: ${escapeHtml(error.message)}</td></tr>`;
-        showToast('Staff management could not be loaded.', 'error');
-      }
+          staffRows.filter(member => member.has_business_data_access).length;
     }
 
     document.getElementById('staff-management-tbody')?.addEventListener('click', async event => {
@@ -946,13 +998,27 @@
 
       const action = button.dataset.staffAction;
       const userId = button.dataset.userId;
-      if (!userId || !['approve', 'revoke'].includes(action)) return;
-      if (action === 'revoke') {
+      if (!userId) return;
+      const member = staffManagementRows.find(item => item.user_id === userId);
+      if (!member || member.role !== 'STAFF') return;
+      if (action === 'edit') {
+        document.getElementById('staff-edit-user-id').value = userId;
+        document.getElementById('staff-edit-name').value = member.full_name || '';
+        document.getElementById('staff-edit-dialog').classList.remove('hidden');
+        document.getElementById('staff-edit-dialog').classList.add('flex');
+        return;
+      }
+      if (!['approve', 'revoke', 'reject', 'suspend', 'reactivate'].includes(action)) return;
+      if (['revoke', 'reject', 'suspend'].includes(action)) {
         const confirmed = await window.ElectroPayModal.show({
           type: 'confirm',
-          title: 'Revoke staff access?',
-          message: 'This staff member will immediately lose access to existing business records.',
-          confirmText: 'Revoke Access',
+          title: `${action[0].toUpperCase()}${action.slice(1)} staff?`,
+          message: action === 'suspend'
+            ? 'This account will be deactivated and all business-data access removed.'
+            : action === 'reject'
+              ? 'This access request will be declined and any access grant removed.'
+              : 'This staff member will immediately lose access to existing business records.',
+          confirmText: action[0].toUpperCase() + action.slice(1),
           cancelText: 'Cancel'
         });
         if (!confirmed) return;
@@ -960,15 +1026,187 @@
 
       button.disabled = true;
       try {
-        const functionName = action === 'approve' ? 'approve_staff_access' : 'revoke_staff_access';
-        const { error } = await window.ElectroPayAuth.client.rpc(functionName, { p_user_id: userId });
+        const calls = {
+          approve: () => window.ElectroPayAuth.client.rpc('approve_staff_access', { p_user_id: userId }),
+          revoke: () => window.ElectroPayAuth.client.rpc('revoke_staff_access', { p_user_id: userId }),
+          reject: () => window.ElectroPayAuth.client.rpc('electropay_reject_staff_access', { p_user_id: userId }),
+          suspend: () => window.ElectroPayAuth.client.rpc('electropay_set_staff_active', { p_user_id: userId, p_active: false }),
+          reactivate: () => window.ElectroPayAuth.client.rpc('electropay_set_staff_active', { p_user_id: userId, p_active: true })
+        };
+        const { error } = await calls[action]();
         if (error) throw error;
-        showToast(action === 'approve' ? 'Staff access approved.' : 'Staff access revoked.', 'success');
+        const successMessage = {
+          approve: 'Staff access approved.',
+          revoke: 'Staff access revoked.',
+          reject: 'Staff access request denied.',
+          suspend: 'Staff account suspended.',
+          reactivate: 'Staff account reactivated.'
+        };
+        showToast(successMessage[action], 'success');
         await renderStaffManagement();
       } catch (error) {
         console.error(`Could not ${action} staff access:`, error);
         showToast(`Staff access could not be ${action === 'approve' ? 'approved' : 'revoked'}.`, 'error');
         button.disabled = false;
+      }
+    });
+
+    document.getElementById('staff-search')?.addEventListener('input', renderStaffManagementRows);
+    document.getElementById('staff-status-filter')?.addEventListener('change', renderStaffManagementRows);
+
+    document.querySelectorAll('.admin-panel-tab').forEach(button => {
+      button.addEventListener('click', () => {
+        const panel = button.dataset.adminPanel;
+        document.getElementById('admin-users-pane').classList.toggle('hidden', panel !== 'users');
+        document.getElementById('admin-notifications-pane').classList.toggle('hidden', panel !== 'notifications');
+        document.getElementById('admin-activity-pane').classList.toggle('hidden', panel !== 'activity');
+        document.querySelectorAll('.admin-panel-tab').forEach(tab => {
+          const active = tab === button;
+          tab.classList.toggle('bg-emerald-600', active);
+          tab.classList.toggle('text-white', active);
+          tab.classList.toggle('border', !active);
+          tab.classList.toggle('border-gray-200', !active);
+        });
+        if (panel === 'notifications') void renderAdminNotifications().catch(error => {
+          console.error('Could not refresh administrator notifications:', error);
+          showToast('Sent notifications could not be loaded.', 'error');
+        });
+        if (panel === 'activity') void renderAdminActivity().catch(error => {
+          console.error('Could not refresh administrator activity:', error);
+          showToast('Activity could not be loaded.', 'error');
+        });
+      });
+    });
+
+    document.getElementById('admin-notification-form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const selectedUsers = [...document.getElementById('admin-notification-recipients').selectedOptions].map(option => option.value);
+      const button = document.getElementById('admin-notification-send');
+      button.disabled = true;
+      try {
+        const { error } = await window.ElectroPayAuth.client.rpc('electropay_send_notification', {
+          p_title: document.getElementById('admin-notification-title').value.trim(),
+          p_message: document.getElementById('admin-notification-message').value.trim(),
+          p_priority: document.getElementById('admin-notification-priority').value,
+          p_user_ids: selectedUsers.length ? selectedUsers : null
+        });
+        if (error) throw error;
+        event.currentTarget.reset();
+        showToast('Notification sent to staff.', 'success');
+        await renderAdminNotifications();
+      } catch (error) {
+        console.error('Could not send ElectroPay notification:', error);
+        showToast(error.message || 'Notification could not be sent.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    async function renderAdminNotifications() {
+      const list = document.getElementById('admin-notifications-list');
+      if (!list) return;
+      const { data, error } = await window.ElectroPayAuth.client.rpc('electropay_admin_list_notifications');
+      if (error) throw error;
+      const notifications = Array.isArray(data) ? data : [];
+      list.replaceChildren();
+      if (!notifications.length) {
+        list.textContent = 'No notifications have been sent.';
+        list.className = 'space-y-2 text-xs text-gray-500 dark:text-gray-400';
+        return;
+      }
+      for (const item of notifications) {
+        const card = document.createElement('article');
+        card.className = 'rounded-xl border border-gray-200 p-3 dark:border-gray-700';
+        const heading = document.createElement('div');
+        heading.className = 'flex items-start justify-between gap-3';
+        const title = document.createElement('h5');
+        title.className = 'text-xs font-semibold text-gray-900 dark:text-white';
+        title.textContent = item.title;
+        const archive = document.createElement('button');
+        archive.type = 'button';
+        archive.dataset.archiveNotification = item.notification_id;
+        archive.disabled = Boolean(item.archived_at);
+        archive.className = 'text-[10px] font-semibold text-red-600 disabled:text-gray-400';
+        archive.textContent = item.archived_at ? 'Archived' : 'Archive';
+        heading.append(title, archive);
+        const message = document.createElement('p');
+        message.className = 'mt-1 whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-300';
+        message.textContent = item.message;
+        const summary = document.createElement('p');
+        summary.className = 'mt-2 text-[10px] text-gray-500 dark:text-gray-400';
+        summary.textContent = `${item.priority} · ${item.read_count}/${item.recipient_count} read · ${new Date(item.created_at).toLocaleString()}`;
+        card.append(heading, message, summary);
+        list.appendChild(card);
+      }
+    }
+
+    document.getElementById('admin-notifications-list')?.addEventListener('click', async event => {
+      const button = event.target.closest('button[data-archive-notification]');
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      try {
+        const { error } = await window.ElectroPayAuth.client.rpc('electropay_archive_notification', {
+          p_notification_id: button.dataset.archiveNotification
+        });
+        if (error) throw error;
+        await renderAdminNotifications();
+      } catch (error) {
+        console.error('Could not archive notification:', error);
+        showToast('Notification could not be archived.', 'error');
+        button.disabled = false;
+      }
+    });
+
+    async function renderAdminActivity() {
+      const list = document.getElementById('admin-activity-list');
+      if (!list) return;
+      const { data, error } = await window.ElectroPayAuth.client.rpc('electropay_list_activity', { p_limit: 200 });
+      if (error) throw error;
+      const activity = Array.isArray(data) ? data : [];
+      list.replaceChildren();
+      if (!activity.length) {
+        list.textContent = 'No recorded activity yet.';
+        list.className = 'max-h-[32rem] space-y-2 overflow-y-auto text-xs text-gray-500 dark:text-gray-400';
+        return;
+      }
+      for (const item of activity) {
+        const row = document.createElement('div');
+        row.className = 'flex flex-col gap-1 rounded-lg border border-gray-100 px-3 py-2 text-xs dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between';
+        const description = document.createElement('p');
+        description.className = 'text-gray-800 dark:text-gray-200';
+        description.textContent = `${item.actor_name} (${item.actor_email || 'account'}) · ${item.action}${item.record_type ? ` · ${item.record_type}` : ''}${item.record_id ? ` #${item.record_id}` : ''}`;
+        const timestamp = document.createElement('time');
+        timestamp.className = 'shrink-0 text-[10px] text-gray-500 dark:text-gray-400';
+        timestamp.dateTime = item.occurred_at;
+        timestamp.textContent = new Date(item.occurred_at).toLocaleString();
+        row.append(description, timestamp);
+        list.appendChild(row);
+      }
+    }
+
+    document.getElementById('staff-edit-dialog-close')?.addEventListener('click', () => {
+      document.getElementById('staff-edit-dialog').classList.add('hidden');
+      document.getElementById('staff-edit-dialog').classList.remove('flex');
+    });
+    document.getElementById('staff-edit-form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const submit = event.currentTarget.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      try {
+        const { error } = await window.ElectroPayAuth.client.rpc('electropay_update_staff_profile', {
+          p_user_id: document.getElementById('staff-edit-user-id').value,
+          p_full_name: document.getElementById('staff-edit-name').value.trim()
+        });
+        if (error) throw error;
+        document.getElementById('staff-edit-dialog').classList.add('hidden');
+        document.getElementById('staff-edit-dialog').classList.remove('flex');
+        await renderStaffManagement();
+        showToast('Staff profile updated.', 'success');
+      } catch (error) {
+        console.error('Could not edit staff profile:', error);
+        showToast(error.message || 'Staff profile could not be updated.', 'error');
+      } finally {
+        submit.disabled = false;
       }
     });
 
