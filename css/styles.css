@@ -66,6 +66,35 @@
       animation: helper-appear 160ms ease-out;
     }
 
+    #select-all-payments {
+      width: 0.85rem;
+      height: 0.85rem;
+      margin: 0;
+      transform: translateY(-1px);
+    }
+
+    #select-all-payments + span {
+      font-size: 0.7rem;
+      line-height: 1.2;
+    }
+
+    thead th {
+      padding-top: 0.75rem !important;
+      padding-bottom: 0.75rem !important;
+    }
+
+    #records-tbody td {
+      padding-top: 0.65rem !important;
+      padding-bottom: 0.65rem !important;
+      vertical-align: middle;
+    }
+
+    #records-tbody td:last-child,
+    #records-tbody td:nth-last-child(2),
+    #records-tbody td:nth-last-child(3) {
+      white-space: nowrap;
+    }
+
     @keyframes helper-appear {
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
@@ -899,7 +928,7 @@
         padding-bottom: 0.8rem;
         vertical-align: middle;
       }
-
+      
       main table tbody tr {
         transition: background-color 150ms ease;
       }

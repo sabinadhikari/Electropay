@@ -92,7 +92,7 @@
   async function readProfile(userId) {
     const { data, error } = await client
       .from('profiles')
-      .select('user_id, full_name, role, active')
+      .select('user_id, full_name, role, active, data_access_granted, access_status')
       .eq('user_id', userId)
       .maybeSingle();
     if (error) throw error;
@@ -141,6 +141,12 @@
     document.getElementById('profile-email').textContent = user.email || '';
     document.getElementById('profile-role').textContent = profile.role;
     document.getElementById('profile-status').textContent = profile.active ? 'Active account' : 'Inactive account';
+
+    if (profile.role === 'STAFF' && !profile.data_access_granted) {
+      showRestrictedAccessScreen(profile.access_status || 'PENDING');
+      return;
+    }
+
     appShell.classList.add('hidden');
     loginScreen.classList.remove('hidden');
     loginForm.classList.add('hidden');
@@ -155,6 +161,8 @@
     appShell.classList.add('hidden');
     loginScreen.classList.remove('hidden');
     registerForm.classList.add('hidden');
+    const restrictedAccess = document.getElementById('restricted-access-screen');
+    if (restrictedAccess) restrictedAccess.classList.add('hidden');
     if (!passwordRecovery) {
       loginForm.classList.remove('hidden');
       document.getElementById('forgot-password').classList.remove('hidden');
@@ -164,8 +172,53 @@
   }
 
   function showWorkspace() {
+    const restrictedAccess = document.getElementById('restricted-access-screen');
+    if (restrictedAccess) restrictedAccess.classList.add('hidden');
     loginScreen.classList.add('hidden');
     appShell.classList.remove('hidden');
+  }
+
+  function showRestrictedAccessScreen(accessStatus = 'PENDING') {
+    loginScreen.classList.remove('hidden');
+    appShell.classList.add('hidden');
+    loginForm.classList.add('hidden');
+    registerForm.classList.add('hidden');
+    document.getElementById('forgot-password').classList.add('hidden');
+    document.getElementById('password-reset-form').classList.add('hidden');
+    const accessCard = document.getElementById('restricted-access-screen');
+    const statusBadge = document.getElementById('access-request-status');
+    const statusText = (accessStatus || 'PENDING').toUpperCase();
+    if (accessCard) accessCard.classList.remove('hidden');
+    if (statusBadge) statusBadge.textContent = statusText;
+    setMessage('');
+  }
+
+  async function requestBusinessDataAccess() {
+    const button = document.getElementById('request-access-button');
+    if (!button) return;
+    button.disabled = true;
+    button.textContent = 'Requesting…';
+
+    try {
+      if (!client) throw new Error('Supabase is not configured. Reload after configuration.');
+      if (client.rpc) {
+        const { error } = await client.rpc('request_electropay_data_access', {
+          p_requested_access: 'Existing business records'
+        });
+        if (error) throw error;
+      }
+      currentProfile = { ...currentProfile, access_status: 'PENDING', data_access_granted: false };
+      document.getElementById('access-request-status').textContent = 'PENDING';
+      document.getElementById('request-access-message').textContent = 'Your access request has been submitted. An administrator will review it shortly.';
+      if (typeof showToast === 'function') showToast('Access request submitted.', 'success');
+    } catch (error) {
+      console.error('Access request failed:', error);
+      if (typeof showToast === 'function') showToast('We could not submit your access request. Please try again.', 'error');
+      document.getElementById('request-access-message').textContent = 'We could not submit your access request right now.';
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Request Access';
+    }
   }
 
   async function initialize() {
@@ -329,6 +382,10 @@
     showRegistrationForm();
   });
 
+  document.getElementById('request-access-button').addEventListener('click', () => {
+    void requestBusinessDataAccess();
+  });
+
   document.getElementById('back-to-login').addEventListener('click', () => {
     showLoginForm();
   });
@@ -443,10 +500,12 @@
     initialize,
     showLogin,
     showWorkspace,
+    showRestrictedAccessScreen,
     get client() { return client; },
     get user() { return currentUser; },
     get profile() { return currentProfile; },
     isAdmin() { return currentProfile?.role === 'ADMIN'; },
+    hasBusinessDataAccess() { return currentProfile?.role === 'ADMIN' || currentProfile?.data_access_granted === true; },
     requireAdmin() {
       if (currentProfile?.role === 'ADMIN') return true;
       if (typeof showToast === 'function') showToast('This action requires an administrator role.', 'error');

@@ -759,7 +759,12 @@
        5. UI TAB ROUTING & NAVIGATION
        ========================================================================== */
     function switchTab(tabId) {
-      const adminTabs = new Set(['trash', 'backup', 'settings']);
+      if (!window.ElectroPayAuth.hasBusinessDataAccess()) {
+        window.ElectroPayAuth.showRestrictedAccessScreen('PENDING');
+        return;
+      }
+
+      const adminTabs = new Set(['trash', 'backup', 'settings', 'staff-management']);
       if (adminTabs.has(tabId) && !window.ElectroPayAuth.isAdmin()) {
         showToast('This page requires an administrator role.', 'error');
         return;
@@ -794,6 +799,7 @@
         'snapshot': [translations[lang].navAdvancesDue, "Current advance credit and pending balances"],
         'backup': [translations[lang].navBackupRestore, "Export JSON or reset application state"],
         'settings': [translations[lang].navSettings, "Configure default tariff and receipt options"],
+        'staff-management': ['User & Staff Management', 'Review roles, access requests, and user status'],
         'receipt': [translations[lang].receiptTitle, "Printable customer voucher"]
       };
       const pageIcons = {
@@ -806,6 +812,7 @@
         'snapshot': 'scale',
         'backup': 'database',
         'settings': 'settings-2',
+        'staff-management': 'users-round',
         'receipt': 'receipt'
       };
 
@@ -826,6 +833,7 @@
       if (tabId === 'analytics') renderAnalytics();
       if (tabId === 'snapshot') renderSnapshotView();
       if (tabId === 'settings') loadSettingsForm();
+      if (tabId === 'staff-management') renderStaffManagement();
       if (tabId === 'backup') {
         document.getElementById('excel-auto-backup').checked = state.settings.autoExcelBackup !== false;
         void updateExcelBackupLocationStatus();
@@ -848,6 +856,7 @@
 
     function applyRoleAccess() {
       const isAdmin = window.ElectroPayAuth.isAdmin();
+      const hasBusinessAccess = window.ElectroPayAuth.hasBusinessDataAccess();
       document.querySelectorAll('[data-admin-only]').forEach(element => {
         element.classList.toggle('role-hidden', !isAdmin);
       });
@@ -858,6 +867,52 @@
       }
       const paymentRate = document.getElementById('input-rate');
       if (paymentRate) paymentRate.readOnly = !isAdmin;
+      const staffManagementCard = document.getElementById('tab-staff-management');
+      if (staffManagementCard) staffManagementCard.classList.toggle('hidden', !isAdmin);
+      if (!hasBusinessAccess && !isAdmin) {
+        window.ElectroPayAuth.showRestrictedAccessScreen(window.ElectroPayAuth.profile?.access_status || 'PENDING');
+      }
+    }
+
+    function renderStaffManagement() {
+      const rows = [
+        { name: 'Admin User', email: 'admin@electropay.local', role: 'ADMIN', status: 'Active', access: 'Approved', joined: '2025-01-12' },
+        { name: 'Nisha Staff', email: 'nisha@electropay.local', role: 'STAFF', status: 'Access Pending', access: 'Pending', joined: '2025-06-08' },
+        { name: 'Rajan Staff', email: 'rajan@electropay.local', role: 'STAFF', status: 'Active', access: 'Approved', joined: '2025-04-22' },
+        { name: 'Sita Staff', email: 'sita@electropay.local', role: 'STAFF', status: 'Suspended', access: 'Revoked', joined: '2025-02-10' }
+      ];
+      const tbody = document.getElementById('staff-management-tbody');
+      if (!tbody) return;
+
+      tbody.innerHTML = rows.map((member, index) => `
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+          <td class="px-3 py-3">
+            <div class="flex items-center gap-3">
+              <div class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">${member.name.split(' ').map(part => part[0]).slice(0, 2).join('').toUpperCase()}</div>
+              <div>
+                <p class="font-semibold text-gray-900 dark:text-white">${member.name}</p>
+                <p class="text-[11px] text-gray-500 dark:text-gray-400">${member.email}</p>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-3"><span class="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">${member.role}</span></td>
+          <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${member.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' : member.status === 'Access Pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${member.status}</span></td>
+          <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${member.access === 'Approved' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300' : member.access === 'Pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${member.access}</span></td>
+          <td class="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">${member.joined}</td>
+          <td class="px-3 py-3">
+            <div class="flex items-center justify-end gap-1.5">
+              <button type="button" class="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">Edit</button>
+              <button type="button" class="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">Approve</button>
+              <button type="button" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">Revoke</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+
+      document.getElementById('staff-total-count').textContent = rows.length;
+      document.getElementById('staff-active-count').textContent = rows.filter(item => item.status === 'Active').length;
+      document.getElementById('staff-pending-access-count').textContent = rows.filter(item => item.access === 'Pending' || item.status === 'Access Pending').length;
+      document.getElementById('staff-verified-count').textContent = rows.filter(item => item.status === 'Active' || item.access === 'Approved').length;
     }
 
     function currentActorLabel() {
