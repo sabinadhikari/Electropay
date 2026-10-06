@@ -20,9 +20,6 @@ create table if not exists public.profiles (
   full_name text not null default '',
   role text not null check (role in ('ADMIN', 'STAFF')),
   active boolean not null default true,
-  data_access_granted boolean not null default false,
-  access_status text not null default 'PENDING' check (access_status in ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED')),
-  access_requested_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -39,6 +36,84 @@ create table if not exists public.staff_access_requests (
   notes text
 );
 
+create table if not exists public.electropay_permissions (
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  user_id uuid not null references public.profiles (user_id) on delete cascade,
+  permission_key text not null check (permission_key in ('BUSINESS_DATA_READ')),
+  granted_by uuid references auth.users (id) on delete set null,
+  granted_at timestamptz not null default now(),
+  primary key (organization_id, user_id, permission_key)
+);
+
+do $$
+declare
+  v_has_access_granted boolean;
+  v_has_access_status boolean;
+  v_has_access_requested_at boolean;
+begin
+  select exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles'
+      and column_name = 'data_access_granted'
+  ) into v_has_access_granted;
+  select exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles'
+      and column_name = 'access_status'
+  ) into v_has_access_status;
+  select exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles'
+      and column_name = 'access_requested_at'
+  ) into v_has_access_requested_at;
+
+  if v_has_access_status then
+    if v_has_access_requested_at then
+      execute $migration$
+        insert into public.staff_access_requests
+          (user_id, full_name, email, request_status, requested_at)
+        select p.user_id,
+               p.full_name,
+               coalesce(u.email, ''),
+               p.access_status,
+               coalesce(p.access_requested_at, p.created_at)
+        from public.profiles p
+        join auth.users u on u.id = p.user_id
+        where p.role = 'STAFF'
+          and p.access_status in ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED')
+        on conflict (user_id) do nothing
+      $migration$;
+    else
+      execute $migration$
+        insert into public.staff_access_requests
+          (user_id, full_name, email, request_status, requested_at)
+        select p.user_id,
+               p.full_name,
+               coalesce(u.email, ''),
+               p.access_status,
+               p.created_at
+        from public.profiles p
+        join auth.users u on u.id = p.user_id
+        where p.role = 'STAFF'
+          and p.access_status in ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED')
+        on conflict (user_id) do nothing
+      $migration$;
+    end if;
+  end if;
+
+  if v_has_access_granted then
+    execute $migration$
+      insert into public.electropay_permissions
+        (organization_id, user_id, permission_key)
+      select p.organization_id, p.user_id, 'BUSINESS_DATA_READ'
+      from public.profiles p
+      where p.role = 'STAFF' and p.data_access_granted
+      on conflict (organization_id, user_id, permission_key) do nothing
+    $migration$;
+  end if;
+end;
+$$;
+
 create or replace function public.handle_new_user_profile()
 returns trigger
 language plpgsql
@@ -50,15 +125,13 @@ begin
     return new;
   end if;
 
-  insert into public.profiles (user_id, organization_id, full_name, role, active, data_access_granted, access_status)
+  insert into public.profiles (user_id, organization_id, full_name, role, active)
   values (
     new.id,
     '8d711fa8-aeba-4e25-8e8d-759450822d4f'::uuid,
     coalesce(new.raw_user_meta_data ->> 'full_name', ''),
     'STAFF',
-    true,
-    false,
-    'PENDING'
+    true
   )
   on conflict (user_id) do nothing;
 
@@ -109,22 +182,47 @@ create table if not exists public.audit_log (
 
 alter table public.profiles enable row level security;
 alter table public.staff_access_requests enable row level security;
+alter table public.electropay_permissions enable row level security;
 alter table public.electropay_state enable row level security;
 alter table public.audit_log enable row level security;
 
-revoke all on public.organizations, public.profiles, public.staff_access_requests, public.electropay_state, public.audit_log from anon, authenticated;
-grant select on public.profiles, public.staff_access_requests, public.audit_log to authenticated;
+revoke all on public.organizations, public.profiles, public.staff_access_requests, public.electropay_permissions, public.electropay_state, public.audit_log from anon, authenticated;
+grant select on public.profiles, public.audit_log to authenticated;
 
-grant insert, update on public.staff_access_requests to authenticated;
-
+drop function if exists public.electropay_current_profile();
 create or replace function public.electropay_current_profile()
-returns table (user_id uuid, organization_id uuid, role text, active boolean, full_name text, data_access_granted boolean, access_status text)
+returns table (user_id uuid, organization_id uuid, role text, active boolean, full_name text, has_business_data_access boolean, access_status text)
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select p.user_id, p.organization_id, p.role, p.active, p.full_name, p.data_access_granted, p.access_status
+  select p.user_id,
+         p.organization_id,
+         p.role,
+         p.active,
+         p.full_name,
+         (p.role = 'ADMIN' or exists (
+           select 1
+           from public.electropay_permissions ep
+           where ep.organization_id = p.organization_id
+             and ep.user_id = p.user_id
+             and ep.permission_key = 'BUSINESS_DATA_READ'
+         )),
+         case
+           when p.role = 'ADMIN' or exists (
+             select 1
+             from public.electropay_permissions ep
+             where ep.organization_id = p.organization_id
+               and ep.user_id = p.user_id
+               and ep.permission_key = 'BUSINESS_DATA_READ'
+           ) then 'APPROVED'
+           else coalesce((
+             select r.request_status
+             from public.staff_access_requests r
+             where r.user_id = p.user_id
+           ), 'PENDING')
+         end
   from public.profiles p
   where p.user_id = (select auth.uid())
 $$;
@@ -146,6 +244,66 @@ as $$
   )
 $$;
 
+create or replace function public.electropay_list_staff()
+returns table (
+  user_id uuid,
+  full_name text,
+  email text,
+  active boolean,
+  has_business_data_access boolean,
+  access_status text,
+  created_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_organization_id uuid;
+begin
+  select p.organization_id into v_organization_id
+  from public.profiles p
+  where p.user_id = (select auth.uid())
+    and p.role = 'ADMIN'
+    and p.active;
+
+  if v_organization_id is null then
+    raise exception 'Only an active administrator can view staff.' using errcode = '42501';
+  end if;
+
+  return query
+  select p.user_id,
+         p.full_name,
+         coalesce(u.email, ''),
+         p.active,
+         exists (
+           select 1
+           from public.electropay_permissions ep
+           where ep.organization_id = p.organization_id
+             and ep.user_id = p.user_id
+             and ep.permission_key = 'BUSINESS_DATA_READ'
+         ),
+         case
+           when exists (
+             select 1
+             from public.electropay_permissions ep
+             where ep.organization_id = p.organization_id
+               and ep.user_id = p.user_id
+               and ep.permission_key = 'BUSINESS_DATA_READ'
+           ) then 'APPROVED'
+           else coalesce(r.request_status, 'PENDING')
+         end,
+         p.created_at
+  from public.profiles p
+  join auth.users u on u.id = p.user_id
+  left join public.staff_access_requests r on r.user_id = p.user_id
+  where p.organization_id = v_organization_id
+    and p.role = 'STAFF'
+  order by p.created_at;
+end
+$$;
+
+drop policy if exists profiles_read_self_or_admin on public.profiles;
 create policy profiles_read_self_or_admin
 on public.profiles for select to authenticated
 using (
@@ -153,28 +311,10 @@ using (
   or public.electropay_is_active_admin(organization_id)
 );
 
-create policy profiles_update_self_or_admin
-on public.profiles for update to authenticated
-using (
-  user_id = (select auth.uid())
-  or public.electropay_is_active_admin(organization_id)
-)
-with check (
-  user_id = (select auth.uid())
-  or public.electropay_is_active_admin(organization_id)
-);
+drop policy if exists profiles_update_self_or_admin on public.profiles;
+drop policy if exists staff_access_requests_manage on public.staff_access_requests;
 
-create policy staff_access_requests_manage
-on public.staff_access_requests for all to authenticated
-using (
-  user_id = (select auth.uid())
-  or public.electropay_is_active_admin((select organization_id from public.profiles where user_id = user_id))
-)
-with check (
-  user_id = (select auth.uid())
-  or public.electropay_is_active_admin((select organization_id from public.profiles where user_id = user_id))
-);
-
+drop policy if exists audit_read_admin on public.audit_log;
 create policy audit_read_admin
 on public.audit_log for select to authenticated
 using (public.electropay_is_active_admin(organization_id));
@@ -192,6 +332,18 @@ begin
   select * into v_profile from public.profiles where user_id = (select auth.uid());
   if not found or not v_profile.active then
     raise exception 'An active ElectroPay account is required.' using errcode = '42501';
+  end if;
+  if v_profile.role <> 'STAFF' then
+    raise exception 'Only staff accounts can request business-data access.' using errcode = '42501';
+  end if;
+  if exists (
+    select 1
+    from public.electropay_permissions ep
+    where ep.organization_id = v_profile.organization_id
+      and ep.user_id = v_profile.user_id
+      and ep.permission_key = 'BUSINESS_DATA_READ'
+  ) then
+    raise exception 'Business-data access has already been granted.' using errcode = '22023';
   end if;
 
   insert into public.staff_access_requests (user_id, full_name, email, requested_access, request_status)
@@ -213,11 +365,6 @@ begin
         notes = null
   returning * into v_request;
 
-  update public.profiles
-  set access_status = 'PENDING',
-      access_requested_at = now()
-  where user_id = v_profile.user_id;
-
   return v_request;
 end
 $$;
@@ -231,16 +378,25 @@ as $$
 declare
   v_profile public.profiles%rowtype;
 begin
-  if not public.electropay_is_active_admin((select organization_id from public.profiles where user_id = p_user_id)) then
+  select * into v_profile
+  from public.profiles
+  where user_id = p_user_id;
+  if not found or v_profile.role <> 'STAFF'
+     or not public.electropay_is_active_admin(v_profile.organization_id) then
     raise exception 'Only an active administrator can approve access.' using errcode = '42501';
   end if;
 
-  update public.profiles
-  set data_access_granted = true,
-      access_status = 'APPROVED',
-      access_requested_at = now()
-  where user_id = p_user_id
-  returning * into v_profile;
+  insert into public.electropay_permissions
+    (organization_id, user_id, permission_key, granted_by, granted_at)
+  values (
+    v_profile.organization_id,
+    v_profile.user_id,
+    'BUSINESS_DATA_READ',
+    (select auth.uid()),
+    now()
+  )
+  on conflict (organization_id, user_id, permission_key)
+  do update set granted_by = excluded.granted_by, granted_at = excluded.granted_at;
 
   update public.staff_access_requests
   set request_status = 'APPROVED',
@@ -250,6 +406,37 @@ begin
   where user_id = p_user_id;
 
   return v_profile;
+end
+$$;
+
+create or replace function public.revoke_staff_access(p_user_id uuid, p_notes text default null)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_profile public.profiles%rowtype;
+begin
+  select * into v_profile
+  from public.profiles
+  where user_id = p_user_id;
+  if not found or v_profile.role <> 'STAFF'
+     or not public.electropay_is_active_admin(v_profile.organization_id) then
+    raise exception 'Only an active administrator can revoke staff access.' using errcode = '42501';
+  end if;
+
+  delete from public.electropay_permissions
+  where organization_id = v_profile.organization_id
+    and user_id = v_profile.user_id
+    and permission_key = 'BUSINESS_DATA_READ';
+
+  update public.staff_access_requests
+  set request_status = 'REVOKED',
+      reviewed_by = (select auth.uid()),
+      reviewed_at = now(),
+      notes = coalesce(p_notes, notes)
+  where user_id = p_user_id;
 end
 $$;
 
@@ -268,7 +455,7 @@ begin
     raise exception 'An active ElectroPay account is required.' using errcode = '42501';
   end if;
 
-  if v_profile.role = 'STAFF' and not coalesce(v_profile.data_access_granted, false) then
+  if v_profile.role = 'STAFF' and not v_profile.has_business_data_access then
     raise exception 'Access to existing business records is pending admin approval.' using errcode = '42501';
   end if;
 
@@ -354,6 +541,9 @@ begin
   select * into v_profile from public.electropay_current_profile();
   if not found or not v_profile.active then
     raise exception 'An active ElectroPay account is required.' using errcode = '42501';
+  end if;
+  if v_profile.role = 'STAFF' and not v_profile.has_business_data_access then
+    raise exception 'Access to existing business records is pending admin approval.' using errcode = '42501';
   end if;
 
   select * into v_current
@@ -689,11 +879,19 @@ $$;
 
 revoke all on function public.electropay_current_profile() from public, anon;
 revoke all on function public.electropay_is_active_admin(uuid) from public, anon;
+revoke all on function public.electropay_list_staff() from public, anon;
+revoke all on function public.request_electropay_data_access(text) from public, anon;
+revoke all on function public.approve_staff_access(uuid, text) from public, anon;
+revoke all on function public.revoke_staff_access(uuid, text) from public, anon;
 revoke all on function public.get_electropay_state() from public, anon;
 revoke all on function public.save_electropay_state(jsonb, bigint) from public, anon;
 revoke all on function public.log_electropay_event(text) from public, anon;
 grant execute on function public.electropay_current_profile() to authenticated;
 grant execute on function public.electropay_is_active_admin(uuid) to authenticated;
+grant execute on function public.electropay_list_staff() to authenticated;
+grant execute on function public.request_electropay_data_access(text) to authenticated;
+grant execute on function public.approve_staff_access(uuid, text) to authenticated;
+grant execute on function public.revoke_staff_access(uuid, text) to authenticated;
 grant execute on function public.get_electropay_state() to authenticated;
 grant execute on function public.save_electropay_state(jsonb, bigint) to authenticated;
 grant execute on function public.log_electropay_event(text) to authenticated;

@@ -90,40 +90,50 @@
   }
 
   async function readProfile(userId) {
-    const { data, error } = await client
-      .from('profiles')
-      .select('user_id, full_name, role, active, data_access_granted, access_status')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const { data, error } = await client.rpc('electropay_current_profile');
     if (error) throw error;
-    if (!data || data.active !== true || !['ADMIN', 'STAFF'].includes(data.role)) {
+    const profile = Array.isArray(data) ? data[0] : data;
+    if (!profile || profile.user_id !== userId || profile.active !== true ||
+        !['ADMIN', 'STAFF'].includes(profile.role)) {
       throw new Error('This account is not enabled for ElectroPay. Contact your administrator.');
     }
 
-    return data;
+    return profile;
   }
 
   async function refreshActiveProfile() {
     if (!client || !currentUser) return;
-    const { data, error } = await client
-      .from('profiles')
-      .select('user_id, full_name, role, active')
-      .eq('user_id', currentUser.id)
-      .maybeSingle();
+    const { data, error } = await client.rpc('electropay_current_profile');
     if (error) {
       console.error('Could not refresh the authenticated ElectroPay profile:', error);
       return;
     }
-    if (!data || !data.active) {
+    const profile = Array.isArray(data) ? data[0] : data;
+    if (!profile || profile.user_id !== currentUser.id || !profile.active) {
       const { error: signOutError } = await client.auth.signOut();
       if (signOutError) console.error('Could not end the disabled ElectroPay session:', signOutError);
       return;
     }
-    if (data.role !== currentProfile?.role || data.full_name !== currentProfile?.full_name) {
-      currentProfile = data;
+
+    const previousProfile = currentProfile;
+    const accessChanged =
+      profile.has_business_data_access !== previousProfile?.has_business_data_access;
+    const profileChanged =
+      profile.role !== previousProfile?.role ||
+      profile.full_name !== previousProfile?.full_name ||
+      profile.access_status !== previousProfile?.access_status;
+    if (accessChanged || profileChanged) {
+      currentProfile = profile;
       document.getElementById('profile-name').textContent =
-        data.full_name.trim() || currentUser.email || 'ElectroPay user';
-      document.getElementById('profile-role').textContent = data.role;
+        profile.full_name.trim() || currentUser.email || 'ElectroPay user';
+      document.getElementById('profile-role').textContent = profile.role;
+      if (profile.role === 'STAFF' && !profile.has_business_data_access) {
+        showRestrictedAccessScreen(profile.access_status || 'PENDING');
+      }
+      if (accessChanged) {
+        window.location.reload();
+        return;
+      }
       document.dispatchEvent(new CustomEvent('electropay:role-changed'));
     }
   }
@@ -142,9 +152,9 @@
     document.getElementById('profile-role').textContent = profile.role;
     document.getElementById('profile-status').textContent = profile.active ? 'Active account' : 'Inactive account';
 
-    if (profile.role === 'STAFF' && !profile.data_access_granted) {
+    if (profile.role === 'STAFF' && !profile.has_business_data_access) {
       showRestrictedAccessScreen(profile.access_status || 'PENDING');
-      return;
+      return false;
     }
 
     appShell.classList.add('hidden');
@@ -153,6 +163,7 @@
     document.getElementById('forgot-password').classList.add('hidden');
     setMessage('Loading your protected ElectroPay workspace…');
     if (logLogin) document.dispatchEvent(new CustomEvent('electropay:authenticated'));
+    return true;
   }
 
   function showLogin(message = '') {
@@ -201,13 +212,11 @@
 
     try {
       if (!client) throw new Error('Supabase is not configured. Reload after configuration.');
-      if (client.rpc) {
-        const { error } = await client.rpc('request_electropay_data_access', {
-          p_requested_access: 'Existing business records'
-        });
-        if (error) throw error;
-      }
-      currentProfile = { ...currentProfile, access_status: 'PENDING', data_access_granted: false };
+      const { error } = await client.rpc('request_electropay_data_access', {
+        p_requested_access: 'Existing business records'
+      });
+      if (error) throw error;
+      currentProfile = { ...currentProfile, access_status: 'PENDING' };
       document.getElementById('access-request-status').textContent = 'PENDING';
       document.getElementById('request-access-message').textContent = 'Your access request has been submitted. An administrator will review it shortly.';
       if (typeof showToast === 'function') showToast('Access request submitted.', 'success');
@@ -264,8 +273,7 @@
         return false;
       }
       try {
-        await showAuthenticatedApp(data.session.user);
-        return true;
+        return await showAuthenticatedApp(data.session.user);
       } catch (profileError) {
         await client.auth.signOut();
         showLogin(profileError.message);
@@ -505,7 +513,7 @@
     get user() { return currentUser; },
     get profile() { return currentProfile; },
     isAdmin() { return currentProfile?.role === 'ADMIN'; },
-    hasBusinessDataAccess() { return currentProfile?.role === 'ADMIN' || currentProfile?.data_access_granted === true; },
+    hasBusinessDataAccess() { return currentProfile?.role === 'ADMIN' || currentProfile?.has_business_data_access === true; },
     requireAdmin() {
       if (currentProfile?.role === 'ADMIN') return true;
       if (typeof showToast === 'function') showToast('This action requires an administrator role.', 'error');

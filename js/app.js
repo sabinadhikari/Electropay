@@ -874,46 +874,103 @@
       }
     }
 
-    function renderStaffManagement() {
-      const rows = [
-        { name: 'Admin User', email: 'admin@electropay.local', role: 'ADMIN', status: 'Active', access: 'Approved', joined: '2025-01-12' },
-        { name: 'Nisha Staff', email: 'nisha@electropay.local', role: 'STAFF', status: 'Access Pending', access: 'Pending', joined: '2025-06-08' },
-        { name: 'Rajan Staff', email: 'rajan@electropay.local', role: 'STAFF', status: 'Active', access: 'Approved', joined: '2025-04-22' },
-        { name: 'Sita Staff', email: 'sita@electropay.local', role: 'STAFF', status: 'Suspended', access: 'Revoked', joined: '2025-02-10' }
-      ];
+    async function renderStaffManagement() {
       const tbody = document.getElementById('staff-management-tbody');
       if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-6 text-center text-xs text-gray-500">Loading staff…</td></tr>';
 
-      tbody.innerHTML = rows.map((member, index) => `
-        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-          <td class="px-3 py-3">
-            <div class="flex items-center gap-3">
-              <div class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">${member.name.split(' ').map(part => part[0]).slice(0, 2).join('').toUpperCase()}</div>
-              <div>
-                <p class="font-semibold text-gray-900 dark:text-white">${member.name}</p>
-                <p class="text-[11px] text-gray-500 dark:text-gray-400">${member.email}</p>
-              </div>
-            </div>
-          </td>
-          <td class="px-3 py-3"><span class="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">${member.role}</span></td>
-          <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${member.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' : member.status === 'Access Pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${member.status}</span></td>
-          <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${member.access === 'Approved' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300' : member.access === 'Pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${member.access}</span></td>
-          <td class="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">${member.joined}</td>
-          <td class="px-3 py-3">
-            <div class="flex items-center justify-end gap-1.5">
-              <button type="button" class="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">Edit</button>
-              <button type="button" class="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">Approve</button>
-              <button type="button" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">Revoke</button>
-            </div>
-          </td>
-        </tr>
-      `).join('');
+      try {
+        const { data, error } = await window.ElectroPayAuth.client.rpc('electropay_list_staff');
+        if (error) throw error;
+        const rows = Array.isArray(data) ? data : [];
+        tbody.innerHTML = rows.length ? rows.map(member => {
+          const name = member.full_name?.trim() || 'Unnamed staff';
+          const initials = name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase();
+          const status = member.active ? 'Active' : 'Suspended';
+          const access = member.has_business_data_access ? 'APPROVED' : member.access_status;
+          const accessLabel = access || 'PENDING';
+          const accessClass = accessLabel === 'APPROVED'
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+            : accessLabel === 'PENDING'
+              ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+              : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300';
+          const action = member.has_business_data_access ? 'revoke' : 'approve';
+          const actionLabel = member.has_business_data_access ? 'Revoke' : 'Approve';
+          const actionClass = member.has_business_data_access
+            ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
+          const joined = member.created_at ? new Date(member.created_at).toLocaleDateString() : '—';
 
-      document.getElementById('staff-total-count').textContent = rows.length;
-      document.getElementById('staff-active-count').textContent = rows.filter(item => item.status === 'Active').length;
-      document.getElementById('staff-pending-access-count').textContent = rows.filter(item => item.access === 'Pending' || item.status === 'Access Pending').length;
-      document.getElementById('staff-verified-count').textContent = rows.filter(item => item.status === 'Active' || item.access === 'Approved').length;
+          return `
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+              <td class="px-3 py-3">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">${escapeHtml(initials || '?')}</div>
+                  <div>
+                    <p class="font-semibold text-gray-900 dark:text-white">${escapeHtml(name)}</p>
+                    <p class="text-[11px] text-gray-500 dark:text-gray-400">${escapeHtml(member.email || '')}</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-3 py-3"><span class="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">STAFF</span></td>
+              <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${member.active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${status}</span></td>
+              <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${accessClass}">${escapeHtml(accessLabel)}</span></td>
+              <td class="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">${escapeHtml(joined)}</td>
+              <td class="px-3 py-3">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button type="button" data-staff-action="${action}" data-user-id="${escapeHtml(member.user_id)}" class="rounded-lg border px-2 py-1 text-[10px] font-semibold ${actionClass}">${actionLabel}</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('') : '<tr><td colspan="6" class="px-3 py-6 text-center text-xs text-gray-500">No staff accounts found.</td></tr>';
+
+        document.getElementById('staff-total-count').textContent = rows.length;
+        document.getElementById('staff-active-count').textContent = rows.filter(member => member.active).length;
+        document.getElementById('staff-pending-access-count').textContent =
+          rows.filter(member => !member.has_business_data_access && member.access_status === 'PENDING').length;
+        document.getElementById('staff-verified-count').textContent =
+          rows.filter(member => member.has_business_data_access).length;
+      } catch (error) {
+        console.error('Could not load staff management data:', error);
+        tbody.innerHTML = `<tr><td colspan="6" class="px-3 py-6 text-center text-xs text-red-600">Could not load staff: ${escapeHtml(error.message)}</td></tr>`;
+        showToast('Staff management could not be loaded.', 'error');
+      }
     }
+
+    document.getElementById('staff-management-tbody')?.addEventListener('click', async event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-staff-action]')
+        : null;
+      if (!button || button.disabled) return;
+
+      const action = button.dataset.staffAction;
+      const userId = button.dataset.userId;
+      if (!userId || !['approve', 'revoke'].includes(action)) return;
+      if (action === 'revoke') {
+        const confirmed = await window.ElectroPayModal.show({
+          type: 'confirm',
+          title: 'Revoke staff access?',
+          message: 'This staff member will immediately lose access to existing business records.',
+          confirmText: 'Revoke Access',
+          cancelText: 'Cancel'
+        });
+        if (!confirmed) return;
+      }
+
+      button.disabled = true;
+      try {
+        const functionName = action === 'approve' ? 'approve_staff_access' : 'revoke_staff_access';
+        const { error } = await window.ElectroPayAuth.client.rpc(functionName, { p_user_id: userId });
+        if (error) throw error;
+        showToast(action === 'approve' ? 'Staff access approved.' : 'Staff access revoked.', 'success');
+        await renderStaffManagement();
+      } catch (error) {
+        console.error(`Could not ${action} staff access:`, error);
+        showToast(`Staff access could not be ${action === 'approve' ? 'approved' : 'revoked'}.`, 'error');
+        button.disabled = false;
+      }
+    });
 
     function currentActorLabel() {
       const profile = window.ElectroPayAuth.profile;
