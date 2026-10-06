@@ -876,10 +876,19 @@
 
     let staffManagementRows = [];
 
+    function describeStaffRpcError(error) {
+      return [
+        error?.message,
+        error?.details,
+        error?.hint,
+        error?.code ? `Code: ${error.code}` : ''
+      ].filter(Boolean).join(' ') || 'No further details were provided.';
+    }
+
     async function renderStaffManagement() {
       const tbody = document.getElementById('staff-management-tbody');
       if (!tbody) return;
-      tbody.innerHTML = '<tr><td colspan="7" class="px-3 py-6 text-center text-xs text-gray-500">Loading staff…</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="px-3 py-6 text-center text-xs text-gray-500">Loading staff…</td></tr>';
 
       try {
         const { data, error } = await window.ElectroPayAuth.client.rpc('electropay_list_staff');
@@ -908,8 +917,9 @@
         });
       } catch (error) {
         console.error('Could not load staff management data:', error);
-        tbody.innerHTML = `<tr><td colspan="7" class="px-3 py-6 text-center text-xs text-red-600">Could not load staff: ${escapeHtml(error.message)}</td></tr>`;
-        showToast('Staff management could not be loaded.', 'error');
+        const reason = describeStaffRpcError(error);
+        tbody.innerHTML = `<tr><td colspan="9" class="px-3 py-6 text-center text-xs text-red-600">Could not load staff: ${escapeHtml(reason)}</td></tr>`;
+        showToast(`Staff management could not be loaded: ${escapeHtml(reason)}`, 'error');
       }
     }
 
@@ -934,6 +944,10 @@
               : accessLabel === 'REJECTED'
                 ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
                 : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300';
+          const businessAccessLabel = member.has_business_data_access ? 'Granted' : 'Not granted';
+          const businessAccessClass = member.has_business_data_access
+            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
           const joined = member.created_at ? new Date(member.created_at).toLocaleString() : '—';
           const lastLogin = member.last_sign_in_at ? new Date(member.last_sign_in_at).toLocaleString() : 'Never';
           const button = (action, label, classes) =>
@@ -968,7 +982,9 @@
                 </div>
                 </td>
                 <td class="px-3 py-3"><span class="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapeHtml(member.role)}</span></td>
+                <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${member.active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'}">${member.active ? 'Active' : 'Inactive'}</span></td>
                 <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${accessClass}">${escapeHtml(accessLabel)}</span></td>
+                <td class="px-3 py-3"><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${businessAccessClass}">${businessAccessLabel}</span></td>
                 <td class="px-3 py-3 text-xs">${member.email_confirmed
                   ? '<span class="text-emerald-700 dark:text-emerald-300">Verified</span>'
                   : '<span class="text-amber-700 dark:text-amber-300">Unverified</span>'}</td>
@@ -979,7 +995,7 @@
                 </td>
               </tr>
             `;
-          }).join('') : '<tr><td colspan="7" class="px-3 py-6 text-center text-xs text-gray-500">No matching staff accounts found.</td></tr>';
+          }).join('') : '<tr><td colspan="9" class="px-3 py-6 text-center text-xs text-gray-500">No matching staff accounts found.</td></tr>';
 
         const staffRows = staffManagementRows.filter(member => member.role === 'STAFF');
         document.getElementById('staff-total-count').textContent = staffRows.length;
@@ -1046,7 +1062,7 @@
         await renderStaffManagement();
       } catch (error) {
         console.error(`Could not ${action} staff access:`, error);
-        showToast(`Staff access could not be ${action === 'approve' ? 'approved' : 'revoked'}.`, 'error');
+        showToast(`Staff access could not be updated: ${escapeHtml(describeStaffRpcError(error))}`, 'error');
         button.disabled = false;
       }
     });
@@ -1204,7 +1220,7 @@
         showToast('Staff profile updated.', 'success');
       } catch (error) {
         console.error('Could not edit staff profile:', error);
-        showToast(error.message || 'Staff profile could not be updated.', 'error');
+        showToast(`Staff profile could not be updated: ${escapeHtml(describeStaffRpcError(error))}`, 'error');
       } finally {
         submit.disabled = false;
       }

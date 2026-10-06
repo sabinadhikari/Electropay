@@ -617,7 +617,12 @@
       message.className = 'text-xs text-emerald-600';
     } catch (error) {
       console.error('Could not update the ElectroPay profile:', error);
-      message.textContent = error.message || 'Profile could not be updated.';
+      message.textContent = [
+        error?.message || 'Profile could not be updated.',
+        error?.details,
+        error?.hint,
+        error?.code ? `Code: ${error.code}` : ''
+      ].filter(Boolean).join(' ');
       message.className = 'text-xs text-red-600';
     }
   });

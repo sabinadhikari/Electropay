@@ -56,4 +56,20 @@ ElectroPay requires a Supabase project. Until it is configured, the application 
 
 The SQL schema stores the existing application state as one revisioned JSON document per organization so existing ledger, receipt, backup, and restore behavior can be preserved. It denies direct client access to business state and permission/request/notification tables: access is mediated by authenticated RPCs, with staff grants stored in `electropay_permissions` and requests in `staff_access_requests`. Notifications use normalized `notifications` and `notification_recipients` tables, so each user can only read and mark their own notifications. Staff can request access but cannot grant it or promote themselves; administrators manage grants, suspensions, profile names, and notifications through organization-checked RPCs. `STAFF` can add a payment and manage customer details, but cannot edit/delete existing payments, restore or permanently delete records, restore/import backups, or change system settings. Staff payments must use the configured rate and cannot be backdated before the latest ledger entry. The database rejects stale revisions rather than silently overwriting another user's save.
 
+If Staff Management or profile updates report that `electropay_list_staff()` or `electropay_update_my_profile(p_full_name)` cannot be found in the PostgREST schema cache, run [`supabase/migrations/20261006210000_restore_staff_management_rpcs.sql`](./supabase/migrations/20261006210000_restore_staff_management_rpcs.sql) in the Supabase SQL Editor. It restores both RPCs from the schema implementations, grants execution only to `authenticated`, and requests a PostgREST schema-cache reload. To inspect deployed function signatures first, run:
+
+```sql
+SELECT
+  n.nspname AS schema_name,
+  p.proname AS function_name,
+  pg_get_function_identity_arguments(p.oid) AS arguments
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname IN (
+    'electropay_list_staff',
+    'electropay_update_my_profile'
+  );
+```
+
 Registration, email verification, login/logout, access review, staff management, notification, payment, backup, and settings events are written to `public.audit_log`; only administrators can query the activity feed. Email addresses are read-only in ElectroPay. Users can update their own display name and change their password after re-authenticating through Supabase Auth. Configure password-recovery and email-confirmation redirect URLs for the deployed app. For production financial records, configure Supabase backups/retention and verify the provider's project security settings before inviting users.
