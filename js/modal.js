@@ -23,6 +23,66 @@
   let previousFocus = null;
   let previousOverflow = '';
   let busy = false;
+  let modalSequence = 0;
+
+  function sanitizeErrorText(value) {
+    if (value == null) return 'Operation failed.';
+    const raw = typeof value === 'string' ? value : value.message || value.details || JSON.stringify(value);
+    const cleaned = String(raw)
+      .replace(/(Bearer\s+|Authorization\s*:\s*|token\s*[:=]\s*|api[_-]?key\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
+      .replace(/(sbp_[A-Za-z0-9]+|eyJ[A-Za-z0-9._-]+)/g, '[redacted]')
+      .trim();
+    if (!cleaned || cleaned === '[object Object]') return 'Operation failed.';
+    return cleaned;
+  }
+
+  function getFriendlyError(error) {
+    const details = [];
+    if (error && typeof error === 'object') {
+      const message = sanitizeErrorText(error.message || error.details || error.hint || error.code);
+      if (message && message !== 'Operation failed.') details.push(message);
+      const extraDetail = [error.details, error.hint].filter(Boolean).map(item => sanitizeErrorText(item)).join(' ');
+      if (extraDetail) details.push(`Technical details: ${extraDetail}`);
+      if (error.code) details.push(`Code: ${error.code}`);
+    }
+    if (!details.length) { 
+      const fallback = sanitizeErrorText(error);
+      return fallback === 'Operation failed.' ? 'Operation failed.' : fallback;
+    }
+    return details.join(' ');
+  }
+
+  function resetModalState() {
+    root.dataset.variant = 'info';
+    icon.replaceChildren();
+    const defaultIcon = document.createElement('i');
+    defaultIcon.dataset.lucide = 'info';
+    defaultIcon.setAttribute('aria-hidden', 'true');
+    icon.appendChild(defaultIcon);
+    title.textContent = 'ElectroPay';
+    message.textContent = '';
+    details.replaceChildren();
+    details.classList.add('hidden');
+    input.value = '';
+    input.required = false;
+    input.disabled = false;
+    input.classList.add('hidden');
+    input.setAttribute('aria-invalid', 'false');
+    input.placeholder = '';
+    inputLabel.textContent = '';
+    inputLabel.classList.add('hidden');
+    errorMessage.textContent = '';
+    errorMessage.classList.add('hidden');
+    cancelButton.textContent = 'Cancel';
+    cancelButton.disabled = false;
+    cancelButton.classList.remove('hidden');
+    confirmButton.textContent = 'Done';
+    confirmButton.disabled = false;
+    busy = false;
+    previousFocus = null;
+    previousOverflow = '';
+    window.lucide?.createIcons({ nodes: [icon] });
+  }
 
   function setVariant(variant) {
     const normalizedVariant = String(variant || 'info').toLowerCase();
@@ -39,31 +99,40 @@
   }
 
   function setFeedback({ type = 'error', message: text, confirmText } = {}) {
+    const current = active;
+    if (!current) return false;
     setVariant(type);
-    if (text) message.textContent = text;
-    if (confirmText) {
-      active.confirmText = confirmText;
+    if (typeof text === 'string' && text.trim()) message.textContent = text;
+    if (typeof confirmText === 'string' && confirmText.trim()) {
+      current.confirmText = confirmText;
       confirmButton.textContent = confirmText;
     }
-    errorMessage.classList.add('hidden');
     errorMessage.textContent = '';
+    errorMessage.classList.add('hidden');
+    confirmButton.disabled = Boolean(current.requiredText && input.value !== current.requiredText);
+    return true;
   }
 
   function close(result = false, force = false) {
-    if (!active || busy && !force) return;
+    const current = active;
+    if (!current || (busy && !force)) return false;
+
+    const resolver = current.resolve;
+    const restoreFocusTarget = previousFocus;
+    const restoreOverflowValue = previousOverflow;
+
     root.classList.add('hidden');
     root.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = previousOverflow;
-    busy = false;
-    cancelButton.disabled = false;
-    confirmButton.disabled = false;
-    input.disabled = false;
-    const resolver = active.resolve;
+    document.body.style.overflow = restoreOverflowValue;
+    resetModalState();
     active = null;
-    input.value = '';
-    if (previousFocus?.isConnected && !previousFocus.closest('.hidden')) previousFocus.focus();
     previousFocus = null;
-    resolver(result);
+    previousOverflow = '';
+    if (restoreFocusTarget && restoreFocusTarget.isConnected && !restoreFocusTarget.closest('.hidden') && !restoreFocusTarget.disabled) {
+      restoreFocusTarget.focus();
+    }
+    if (typeof resolver === 'function') resolver(result);
+    return result;
   }
 
   function getFocusableElements() {
@@ -73,14 +142,17 @@
   }
 
   async function runConfirmAction() {
-    if (!active || busy) return;
-    if (active.requiredText && input.value !== active.requiredText) {
+    const current = active;
+    if (!current || busy) return;
+    const sessionToken = current.session;
+
+    if (current.requiredText && input.value !== current.requiredText) {
       input.setAttribute('aria-invalid', 'true');
       input.focus();
       return;
     }
 
-    if (!active.onConfirm) {
+    if (!current.onConfirm) {
       close(true, true);
       return;
     }
@@ -89,28 +161,30 @@
     confirmButton.disabled = true;
     cancelButton.disabled = true;
     input.disabled = true;
-    confirmButton.textContent = active.loadingText || 'Please wait…';
+    confirmButton.textContent = current.loadingText || 'Please wait…';
     errorMessage.classList.add('hidden');
     errorMessage.textContent = '';
+
     try {
-      const result = await active.onConfirm();
+      const result = await current.onConfirm();
+      if (active?.session !== sessionToken) return;
       if (result !== false) {
         close(true, true);
         return;
       }
     } catch (error) {
+      if (active?.session !== sessionToken) return;
       console.error('ElectroPay dialog action failed:', error);
-      errorMessage.textContent = error instanceof Error ? error.message : 'The action could not be completed. Please try again.';
+      errorMessage.textContent = getFriendlyError(error);
       errorMessage.classList.remove('hidden');
     } finally {
-      if (active) {
-        busy = false;
-        confirmButton.disabled = Boolean(active.requiredText && input.value !== active.requiredText);
-        cancelButton.disabled = false;
-        input.disabled = false;
-        if (confirmButton.textContent === (active.loadingText || 'Please wait…')) {
-          confirmButton.textContent = active.confirmText;
-        }
+      if (active?.session !== sessionToken) return;
+      busy = false;
+      cancelButton.disabled = false;
+      input.disabled = false;
+      confirmButton.disabled = Boolean(current.requiredText && input.value !== current.requiredText);
+      if (confirmButton.textContent === (current.loadingText || 'Please wait…')) {
+        confirmButton.textContent = current.confirmText || 'Done';
       }
     }
   }
@@ -140,13 +214,14 @@
       ? 'info'
       : icons[normalizedType] ? normalizedType : 'info';
 
+    resetModalState();
     previousFocus = document.activeElement;
+    previousOverflow = document.body.style.overflow;
+    const session = ++modalSequence;
+
     setVariant(safeType);
     title.textContent = heading;
     message.textContent = body;
-    errorMessage.textContent = '';
-    errorMessage.classList.add('hidden');
-
     details.replaceChildren();
     for (const item of detailItems) {
       const listItem = document.createElement('li');
@@ -160,7 +235,7 @@
     input.required = needsInput;
     input.setAttribute('aria-invalid', 'false');
     input.placeholder = inputPlaceholder || requiredText;
-    inputLabel.textContent = phraseLabel || `Type exactly: ${requiredText}`;
+    inputLabel.textContent = phraseLabel || (requiredText ? `Type exactly: ${requiredText}` : '');
     inputLabel.classList.toggle('hidden', !needsInput);
     input.classList.toggle('hidden', !needsInput);
 
@@ -171,18 +246,19 @@
     confirmButton.disabled = needsInput;
     input.disabled = false;
     active = {
+      type: safeType,
       onConfirm,
       requiredText,
       confirmText,
       loadingText,
       resolve: null,
+      session,
       closeOnBackdrop: closeOnBackdrop ?? (!onConfirm && !needsInput && safeType !== 'danger'),
       closeOnEscape: closeOnEscape ?? (!needsInput && safeType !== 'danger')
     };
 
     root.classList.remove('hidden');
     root.setAttribute('aria-hidden', 'false');
-    previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.lucide?.createIcons({ nodes: [root] });
     (needsInput ? input : onConfirm ? cancelButton : confirmButton).focus();
@@ -195,11 +271,15 @@
   root.addEventListener('click', event => {
     if (event.target === root && active?.closeOnBackdrop && !busy) close(false);
   });
-  cancelButton.addEventListener('click', () => close(false));
+  cancelButton.addEventListener('click', () => {
+    if (busy) return;
+    close(false);
+  });
   confirmButton.addEventListener('click', () => { void runConfirmAction(); });
   input.addEventListener('input', () => {
+    if (!active) return;
     input.setAttribute('aria-invalid', 'false');
-    confirmButton.disabled = input.value !== active?.requiredText;
+    confirmButton.disabled = input.value !== active.requiredText;
   });
   panel.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
